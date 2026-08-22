@@ -15,7 +15,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Generated runtime artifacts
+# Project-generated artifacts
+/data/
+test_investigations*.json
 /data/audit_records.json
 /data/investigations.json
 /data/exceptions_export.*

@@ -8,12 +8,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
 from app.ai_agent import InvestigationAgent, InvestigationStore, MockAIProvider
 from app.audit import AuditStore, ReviewState, transition_review_state
 from app.matching import match_records
 from app.models import TransactionRecord
 from app.normalization import normalize_records
-from app.reporting import build_exception_report, build_summary, export_exception_report
+from app.reporting import build_exception_report, build_summary, export_exception_report as export_exception_report_helper
 from app.validation import generate_synthetic_batch
 
 
@@ -299,7 +302,7 @@ class FinanceService:
 
     def export_exceptions(self, fmt: str = "json") -> Tuple[bytes, str]:
         output_path = self.data_dir / f"exceptions_export.{fmt.lower()}"
-        export_exception_report(self.results, output_path, fmt=fmt.lower())
+        export_exception_report_helper(self.results, output_path, fmt=fmt.lower())
         content = output_path.read_bytes()
         media_type = "application/json" if fmt.lower() == "json" else "text/csv"
         return content, media_type
@@ -447,13 +450,126 @@ class FinanceAPI:
             self._thread.join(timeout=5)
 
 
-app = FinanceAPI()
+service = FinanceService()
+app = FastAPI(title="Finance Controller API")
+
+
+class ReviewRequest(BaseModel):
+    decision: str
+    reviewer: str
+    comment: str = ""
+
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/")
+def root() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/transactions")
+def list_transactions(
+    status: Optional[str] = None,
+    exception_type: Optional[str] = None,
+    transaction_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    return service.list_transactions(
+        status=status,
+        exception_type=exception_type,
+        transaction_id=transaction_id,
+    )
+
+
+@app.get("/transactions/{transaction_id}")
+def get_transaction(transaction_id: str) -> Dict[str, Any]:
+    try:
+        return service.get_transaction(transaction_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "TRANSACTION_NOT_FOUND", "message": "Transaction not found."}) from exc
+
+
+@app.get("/exceptions")
+def list_exceptions(
+    exception_type: Optional[str] = None,
+    review_status: Optional[str] = None,
+    severity: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    return service.list_exceptions(
+        exception_type=exception_type,
+        review_status=review_status,
+        severity=severity,
+    )
+
+
+@app.get("/exceptions/{exception_id}")
+def get_exception(exception_id: str) -> Dict[str, Any]:
+    try:
+        return service.get_exception(exception_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
+
+
+@app.post("/exceptions/{exception_id}/investigate")
+def investigate_exception(exception_id: str) -> Dict[str, Any]:
+    try:
+        return service.investigate_exception(exception_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
+
+
+@app.get("/exceptions/{exception_id}/reviews")
+def get_review_history(exception_id: str) -> List[Dict[str, Any]]:
+    try:
+        return service.get_review_history(exception_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
+
+
+@app.post("/exceptions/{exception_id}/review")
+def review_exception(exception_id: str, payload: ReviewRequest) -> Dict[str, Any]:
+    decision = payload.decision.upper()
+    if decision not in {"APPROVED", "REJECTED", "ESCALATED"}:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_REVIEW_DECISION", "message": "Decision must be APPROVED, REJECTED, or ESCALATED."})
+    if not payload.reviewer.strip():
+        raise HTTPException(status_code=422, detail={"error": "VALIDATION_ERROR", "message": "Reviewer must not be empty."})
+    try:
+        return service.review_exception(exception_id, decision, payload.reviewer, payload.comment)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"error": "INVALID_REVIEW_TRANSITION", "message": str(exc)}) from exc
+
+
+@app.get("/audit/{transaction_id}")
+def get_audit_history(transaction_id: str) -> Dict[str, Any]:
+    return service.get_audit_history(transaction_id)
+
+
+@app.get("/reports/reconciliation")
+def get_reconciliation_report() -> Dict[str, Any]:
+    return service.get_reconciliation_report()
+
+
+@app.get("/reports/exceptions")
+def get_exception_report() -> Dict[str, Any]:
+    return service.get_exception_report()
+
+
+@app.get("/reports/exceptions/export")
+def export_exception_report_endpoint(format: str = "json") -> Any:
+    fmt = format.lower()
+    if fmt not in {"json", "csv"}:
+        raise HTTPException(status_code=422, detail={"error": "INVALID_FORMAT", "message": "Format must be json or csv."})
+    data, media = service.export_exceptions(fmt)
+    if fmt == "json":
+        return json.loads(data.decode("utf-8"))
+    return data.decode("utf-8")
 
 
 if __name__ == "__main__":
-    app.start()
-    try:
-        while True:
-            threading.Event().wait(1)
-    except KeyboardInterrupt:
-        app.stop()
+    import uvicorn
+
+    uvicorn.run("app.api:app", host="127.0.0.1", port=8000, reload=False)

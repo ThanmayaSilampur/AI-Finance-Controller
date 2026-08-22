@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+coverage/
+htmlcov/
+.pytype/
+.mypy_cache/
+.ruff_cache/
+
+# Generated runtime artifacts
+/data/audit_records.json
+/data/investigations.json
+/data/exceptions_export.*

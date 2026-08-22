@@ -1,0 +1,857 @@
+track 04
+
+AI Finance Controller
+Run the books and the cash position
+
+Build an agent that closes one finance-ops loop across a 50+ record batch of synthetic data, reporting its match rate and the exceptions it could not resolve.
+
+why now
+The 2026 builder consensus: verification capacity, not generation speed, is the bottleneck. Reconciliation, settlement and forecasting are still done by hand.
+
+example directions
+Multi-source reconciliation
+Settlement Q&A agent
+Forward cash forecaster
+Tax-line matcher
+the bar
+Throughput plus measured accuracy plus an honest exception list. One cherry-picked match proves nothing.
+
+
+# CODING AGENT PROMPT — TRACK 4: AI FINANCE CONTROLLER
+
+## Project Title
+
+**AI Finance Controller — Intelligent Financial Reconciliation & Exception Management Platform**
+
+## Project Objective
+
+Build a working **AI-powered finance operations system** that helps businesses automatically reconcile financial records, identify mismatches, investigate exceptions, and recommend appropriate actions.
+
+The core problem is:
+
+> Financial systems often contain records from multiple sources that should correspond to each other, but differences can occur because of missing transactions, duplicate records, incorrect amounts, timing differences, refunds, fees, or other discrepancies.
+
+The system should automatically compare financial records, identify which records match, identify exceptions, explain likely reasons for mismatches, and provide a clear resolution workflow.
+
+The system must be designed around **financial accuracy, traceability, auditability, and human review**.
+
+---
+
+# 1. Core Problem
+
+A merchant may have financial records coming from multiple systems.
+
+For example:
+
+```text
+Payment System
+      ↓
+₹1,000 payment
+
+Bank Statement
+      ↓
+₹1,000 received
+
+Internal Ledger
+      ↓
+₹1,000 recorded
+```
+
+These records should correspond.
+
+But sometimes we might see:
+
+```text
+Payment System
+₹1,000
+
+Bank Statement
+₹1,000
+
+Internal Ledger
+₹900
+```
+
+Now there is a discrepancy.
+
+The Finance Controller should detect this automatically.
+
+---
+
+# 2. What the System Should Do
+
+The system should:
+
+1. Receive financial records.
+2. Normalize the records into a common structure.
+3. Match corresponding records.
+4. Identify unmatched or conflicting records.
+5. Classify the exception.
+6. Explain the likely reason.
+7. Recommend the next action.
+8. Allow a human to review unresolved exceptions.
+9. Record the final resolution.
+10. Provide reconciliation metrics.
+
+The goal is to automate repetitive finance operations while keeping important financial decisions auditable.
+
+---
+
+# 3. Basic System Flow
+
+Implement the following conceptual pipeline:
+
+```text
+Financial Records
+       ↓
+Data Ingestion
+       ↓
+Normalization
+       ↓
+Record Matching
+       ↓
+Match / Mismatch Detection
+       ↓
+Exception Classification
+       ↓
+AI Investigation / Explanation
+       ↓
+Recommended Resolution
+       ↓
+Human Review if Required
+       ↓
+Final Resolution
+       ↓
+Audit Trail + Metrics
+```
+
+---
+
+# 4. Example Financial Records
+
+The system can work with multiple sources such as:
+
+```text
+Payment Records
+Bank Records
+Internal Ledger Records
+Refund Records
+Settlement Records
+```
+
+For an MVP, use **three sources**:
+
+```text
+Payment System
+Bank Statement
+Internal Ledger
+```
+
+This gives enough complexity without making the project unnecessarily large.
+
+---
+
+# 5. Example
+
+Suppose the payment system contains:
+
+```text
+Transaction ID: TX1001
+Amount: ₹2,500
+Status: SUCCESS
+Date: 20-Aug
+```
+
+The bank contains:
+
+```text
+Reference: TX1001
+Amount: ₹2,500
+Date: 20-Aug
+```
+
+The ledger contains:
+
+```text
+Transaction ID: TX1001
+Amount: ₹2,500
+Date: 20-Aug
+```
+
+The system should identify:
+
+```text
+MATCHED ✓
+```
+
+---
+
+Now suppose:
+
+```text
+Payment:
+TX1002
+₹5,000
+
+Bank:
+TX1002
+₹5,000
+
+Ledger:
+TX1002
+₹4,500
+```
+
+The system should identify:
+
+```text
+MISMATCH ⚠
+
+Expected: ₹5,000
+Ledger: ₹4,500
+
+Difference: ₹500
+```
+
+---
+
+# 6. Types of Exceptions
+
+The system should support different exception categories.
+
+Examples:
+
+### Missing record
+
+```text
+Payment exists
+Bank record missing
+```
+
+### Amount mismatch
+
+```text
+Payment: ₹5,000
+Bank: ₹4,800
+```
+
+### Duplicate transaction
+
+```text
+Same transaction appears twice
+```
+
+### Date mismatch
+
+```text
+Payment date: 20-Aug
+Bank date: 21-Aug
+```
+
+### Status mismatch
+
+```text
+Payment: SUCCESS
+Ledger: FAILED
+```
+
+### Fee difference
+
+```text
+Payment: ₹1,000
+Settlement: ₹980
+
+Difference: ₹20
+Possible reason: processing fee
+```
+
+The system should be able to identify and categorize these exceptions.
+
+---
+
+# 7. Matching Engine
+
+Build a reconciliation engine that determines whether records from different sources correspond to each other.
+
+Matching can consider:
+
+```text
+Transaction ID
+Reference ID
+Amount
+Date
+Customer/order ID
+Payment status
+```
+
+Use deterministic matching rules where the relationship is obvious.
+
+For example:
+
+```text
+Exact transaction ID
++
+Same amount
++
+Compatible date
+```
+
+→ Strong match.
+
+For records where identifiers are missing or inconsistent, an intelligent matching mechanism can be used.
+
+---
+
+# 8. AI Usage
+
+Do not use AI for everything.
+
+The system should deliberately separate deterministic financial logic from AI reasoning.
+
+### Normal deterministic code
+
+Use for:
+
+```text
+Exact matching
+Amount calculations
+Difference calculations
+Duplicate detection
+Validation
+Financial totals
+```
+
+These should not require an LLM.
+
+### AI
+
+Use AI where reasoning is useful.
+
+For example:
+
+> "Why might these two records differ?"
+
+The AI could analyze:
+
+```text
+Payment amount
+Settlement amount
+Fee information
+Dates
+Status
+Historical patterns
+```
+
+and produce:
+
+```text
+Likely reason:
+₹20 difference is consistent with a processing fee.
+
+Confidence:
+High
+
+Recommended action:
+Mark as expected fee difference.
+```
+
+This is a much more appropriate use of AI.
+
+---
+
+# 9. Exception Investigation
+
+Each unresolved exception should have a detailed investigation page.
+
+Example:
+
+```text
+EXCEPTION #EX1024
+
+Transaction:
+TX2048
+
+Payment:
+₹5,000
+
+Bank:
+₹4,800
+
+Difference:
+₹200
+
+Classification:
+Amount mismatch
+```
+
+Then:
+
+### AI Investigation
+
+```text
+Possible explanation:
+
+The ₹200 difference appears consistent with a
+processing/settlement fee based on similar historical
+transactions.
+```
+
+### Recommended Action
+
+```text
+Verify settlement fee
+```
+
+### Status
+
+```text
+AWAITING REVIEW
+```
+
+---
+
+# 10. Human-in-the-Loop
+
+Financial systems should not blindly allow AI to modify accounting records.
+
+The system should support human review.
+
+Example:
+
+```text
+AI Recommendation
+       ↓
+Human Reviewer
+       ↓
+Approve
+OR
+Reject
+OR
+Request Investigation
+```
+
+The reviewer can record:
+
+```text
+Decision:
+Approved
+
+Comment:
+Confirmed as payment processing fee.
+```
+
+The final decision should be stored.
+
+---
+
+# 11. Audit Trail
+
+Every important financial action must be traceable.
+
+Store:
+
+```text
+Exception ID
+Transaction ID
+Source records
+Detected mismatch
+Difference
+AI explanation
+AI recommendation
+Human decision
+Reviewer
+Timestamp
+Final resolution
+```
+
+Example:
+
+```text
+EX1024
+TX2048
+Difference: ₹200
+AI reason: Processing fee
+Recommendation: Verify fee
+Reviewer: Finance Admin
+Decision: Approved
+Timestamp: 20-Aug 14:32
+```
+
+This makes the system auditable.
+
+---
+
+# 12. Dashboard
+
+Create a finance-controller dashboard.
+
+Example:
+
+```text
+AI FINANCE CONTROLLER
+
+Records Processed       10,000
+
+Matched                  9,420
+
+Exceptions                 580
+
+Resolved                   490
+
+Pending Review              90
+
+Match Rate                94.2%
+```
+
+Also display:
+
+```text
+Exception Categories
+
+Amount Mismatch       210
+Missing Record        145
+Duplicate              86
+Date Difference        74
+Status Difference      65
+```
+
+The actual values must come from the dataset.
+
+Do not hard-code fake metrics.
+
+---
+
+# 13. Reconciliation Results
+
+Provide a clear summary:
+
+```text
+Total Records:          10,000
+Matched:                 9,420
+Unmatched:                 580
+Resolved:                  490
+Pending:                   90
+
+Match Rate:               XX%
+Resolution Rate:          XX%
+```
+
+The system should calculate these dynamically.
+
+---
+
+# 14. Batch Processing
+
+The system should support processing a batch of financial records.
+
+For example:
+
+```text
+Upload / Load Data
+        ↓
+Process 500+ records
+        ↓
+Reconcile automatically
+        ↓
+Generate results
+```
+
+The system should show:
+
+```text
+Records processed
+Records matched
+Exceptions found
+Exceptions resolved
+Unresolved exceptions
+```
+
+This demonstrates that the system is not merely a single-record demo.
+
+---
+
+# 15. Exception Prioritization
+
+Not every mismatch has the same importance.
+
+For example:
+
+```text
+₹10 difference
+```
+
+may be less urgent than:
+
+```text
+₹50,000 missing transaction
+```
+
+Therefore, assign priority.
+
+Example:
+
+```text
+LOW
+₹0–₹500
+
+MEDIUM
+₹500–₹10,000
+
+HIGH
+> ₹10,000
+```
+
+These are example thresholds and should be configurable.
+
+The system should allow the finance team to focus on high-value exceptions first.
+
+---
+
+# 16. AI Explanation
+
+The AI explanation must be based on actual available evidence.
+
+Example:
+
+```text
+Exception:
+
+Payment: ₹10,000
+Settlement: ₹9,800
+
+Historical pattern:
+Similar transactions normally have ₹200 fees.
+
+AI explanation:
+The difference is likely a standard settlement fee.
+
+Confidence:
+High
+
+Recommended action:
+Verify fee configuration.
+```
+
+Do not allow the AI to invent financial records or evidence.
+
+If insufficient information exists, it should say:
+
+```text
+Insufficient evidence to determine the cause.
+Manual investigation required.
+```
+
+---
+
+# 17. Confidence
+
+Where AI is used, display a confidence level or confidence category when appropriate.
+
+Example:
+
+```text
+AI Assessment:
+
+Likely Processing Fee
+Confidence: HIGH
+```
+
+or:
+
+```text
+Cause:
+Unknown
+Confidence: LOW
+
+Action:
+Manual investigation required
+```
+
+Do not represent an LLM's subjective confidence as a mathematically calibrated probability unless the system actually implements such calibration.
+
+---
+
+# 18. Data Model
+
+Create structured records.
+
+For example:
+
+```text
+transaction_id
+customer_id
+amount
+currency
+timestamp
+status
+payment_reference
+source
+```
+
+Additional fields can include:
+
+```text
+settlement_amount
+fee
+refund_amount
+bank_reference
+ledger_reference
+```
+
+The exact schema can be refined during implementation.
+
+---
+
+# 19. Example Architecture
+
+Use a modular architecture:
+
+```text
+                  ┌───────────────────┐
+                  │     Dashboard     │
+                  │  Finance Console  │
+                  └─────────┬─────────┘
+                            │
+                            ▼
+                  ┌───────────────────┐
+                  │    Backend API    │
+                  └─────────┬─────────┘
+                            │
+             ┌──────────────┼──────────────┐
+             ▼              ▼              ▼
+       Data Ingestion    Database     Evaluation
+             │
+             ▼
+       Normalization
+             │
+             ▼
+       Matching Engine
+             │
+       ┌─────┴─────┐
+       ▼           ▼
+    Matched     Exception
+                    │
+                    ▼
+              AI Investigation
+                    │
+                    ▼
+             Recommendation
+                    │
+                    ▼
+              Human Review
+                    │
+                    ▼
+             Final Resolution
+                    │
+                    ▼
+               Audit Trail
+```
+
+---
+
+# 20. MVP
+
+Build these features first:
+
+```text
+1. Financial dataset
+2. Three-source reconciliation
+3. Record matching
+4. Mismatch detection
+5. Exception classification
+6. Exception dashboard
+7. AI explanation
+8. Recommended resolution
+9. Human review
+10. Audit trail
+11. Batch processing
+12. Reconciliation metrics
+```
+
+Do not start with advanced features.
+
+First make the reconciliation pipeline reliable.
+
+---
+
+# 21. Advanced Features
+
+After the MVP works, possible additions include:
+
+```text
+- Intelligent fuzzy matching
+- Historical anomaly detection
+- Automatic exception prioritization
+- Recurring mismatch detection
+- Finance trend analysis
+- Natural-language investigation
+- CSV upload
+- Automated reconciliation reports
+- Resolution recommendation learning
+- Exception clustering
+```
+
+Only add these if the core reconciliation system is already stable.
+
+---
+
+# 22. What NOT to Build
+
+Do NOT build:
+
+```text
+Generic AI chatbot
+```
+
+Do NOT make the project only:
+
+```text
+Upload CSV → show a pretty table
+```
+
+Do NOT let an LLM arbitrarily modify financial records.
+
+Do NOT fabricate reconciliation statistics.
+
+Do NOT claim that AI is performing reconciliation if deterministic matching actually performs the work.
+
+Do NOT hide unresolved exceptions.
+
+The system should clearly distinguish:
+
+```text
+MATCHED
+EXCEPTION
+RESOLVED
+PENDING REVIEW
+```
+
+---
+
+# 23. Final Product Goal
+
+The final system should communicate:
+
+> **We built an AI Finance Controller that automatically reconciles financial records across multiple sources, detects and classifies discrepancies, investigates exceptions using contextual AI reasoning, recommends appropriate resolutions, supports human review, and maintains a complete audit trail.**
+
+The central idea is:
+
+```text
+Financial Data
+      ↓
+Reconcile
+      ↓
+Find Exceptions
+      ↓
+Understand Why
+      ↓
+Recommend Resolution
+      ↓
+Human Approval
+      ↓
+Resolve + Audit
+```
+
+The goal is **not** to replace finance professionals completely.
+
+The goal is to remove repetitive reconciliation work and help finance teams identify and resolve important exceptions faster, while keeping financial decisions **controlled, explainable and auditable**.

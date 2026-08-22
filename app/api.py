@@ -1,0 +1,459 @@
+from __future__ import annotations
+
+import json
+import threading
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
+
+from app.ai_agent import InvestigationAgent, InvestigationStore, MockAIProvider
+from app.audit import AuditStore, ReviewState, transition_review_state
+from app.matching import match_records
+from app.models import TransactionRecord
+from app.normalization import normalize_records
+from app.reporting import build_exception_report, build_summary, export_exception_report
+from app.validation import generate_synthetic_batch
+
+
+class FinanceService:
+    def __init__(self, data_dir: Optional[str | Path] = None) -> None:
+        self.data_dir = Path(data_dir) if data_dir is not None else Path(__file__).resolve().parent.parent / "data"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.audit_store = AuditStore(path=self.data_dir / "audit_records.json")
+        self.investigation_store = InvestigationStore(path=self.data_dir / "investigations.json")
+        self.agent = InvestigationAgent(store=self.investigation_store, provider=MockAIProvider())
+        self.batch = generate_synthetic_batch(60)
+        self.payment_records = self._build_records(self.batch["payment"], "payment")
+        self.bank_records = self._build_records(self.batch["bank"], "bank")
+        self.ledger_records = self._build_records(self.batch["ledger"], "ledger")
+        self.results = match_records(self.payment_records, self.bank_records, self.ledger_records)
+        self._seed_audit_records()
+
+    def _build_records(self, rows: List[dict], source_system: str) -> List[TransactionRecord]:
+        records: List[TransactionRecord] = []
+        for row in rows:
+            records.append(
+                TransactionRecord(
+                    transaction_id=str(row.get("transaction_id") or row.get("id") or "UNKNOWN"),
+                    source_system=source_system,
+                    amount=0,
+                    raw=dict(row),
+                )
+            )
+        return normalize_records(records)
+
+    def _seed_audit_records(self) -> None:
+        if self.audit_store._read():
+            return
+        for result in self.results:
+            if not result.exception_type:
+                continue
+            record = self._build_exception_record(result)
+            self.audit_store.create_record(
+                transaction_id=record["transaction_id"],
+                match_status="EXCEPTION",
+                exception_type=record["exception_type"],
+                payment_amount=record["payment_amount"],
+                bank_amount=record["bank_amount"],
+                ledger_amount=record["ledger_amount"],
+                difference=record["difference"],
+                recommended_action=record["recommended_action"],
+            )
+
+    def _build_exception_record(self, result: Any) -> Dict[str, Any]:
+        payment = next((item for item in self.payment_records if item.transaction_id == result.transaction_id), None)
+        bank = next((item for item in self.bank_records if item.transaction_id == result.transaction_id), None)
+        ledger = next((item for item in self.ledger_records if item.transaction_id == result.transaction_id), None)
+        payment_amount = float(payment.amount) if payment else None
+        bank_amount = float(bank.amount) if bank else None
+        ledger_amount = float(ledger.amount) if ledger else None
+        difference = None
+        if payment_amount is not None and bank_amount is not None:
+            difference = abs(payment_amount - bank_amount)
+        elif payment_amount is not None and ledger_amount is not None:
+            difference = abs(payment_amount - ledger_amount)
+        return {
+            "transaction_id": result.transaction_id,
+            "exception_type": result.exception_type,
+            "payment_amount": payment_amount,
+            "bank_amount": bank_amount,
+            "ledger_amount": ledger_amount,
+            "difference": difference,
+            "recommended_action": result.recommended_action,
+        }
+
+    def _transaction_payload(self, transaction_id: str) -> Dict[str, Any]:
+        payment = next((record for record in self.payment_records if record.transaction_id == transaction_id), None)
+        bank = next((record for record in self.bank_records if record.transaction_id == transaction_id), None)
+        ledger = next((record for record in self.ledger_records if record.transaction_id == transaction_id), None)
+        matching = next((result for result in self.results if result.transaction_id == transaction_id), None)
+        return {
+            "transaction_id": transaction_id,
+            "source_records": {
+                key: self._serialize_record(value)
+                for key, value in {"payment": payment, "bank": bank, "ledger": ledger}.items()
+                if value is not None
+            },
+            "normalized_values": {
+                "payment": str(payment.amount) if payment else None,
+                "bank": str(bank.amount) if bank else None,
+                "ledger": str(ledger.amount) if ledger else None,
+            },
+            "reconciliation_result": self._serialize_result(matching) if matching else None,
+        }
+
+    def _serialize_record(self, record: TransactionRecord) -> Dict[str, Any]:
+        return {
+            "transaction_id": record.transaction_id,
+            "source_system": record.source_system,
+            "amount": str(record.amount),
+            "currency": record.currency,
+            "transaction_date": record.transaction_date.isoformat() if record.transaction_date else None,
+            "status": record.status,
+            "reference_id": record.reference_id,
+            "customer_id": record.customer_id,
+            "order_id": record.order_id,
+        }
+
+    def _serialize_result(self, result: Any) -> Dict[str, Any]:
+        return {
+            "transaction_id": result.transaction_id,
+            "matched": result.matched,
+            "match_score": result.match_score,
+            "exception_type": result.exception_type,
+            "explanations": result.explanations,
+            "recommended_action": result.recommended_action,
+            "details": result.details,
+        }
+
+    def _serialize_exception(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        exception_id = record.get("exception_id") or f"EX-{record['audit_id'].split('-')[-1]}"
+        transaction_id = record.get("transaction_id")
+        return {
+            "exception_id": exception_id,
+            "audit_id": record.get("audit_id"),
+            "transaction_id": transaction_id,
+            "exception_type": record.get("exception_type"),
+            "severity": self._severity_from_exception(record.get("exception_type")),
+            "difference": record.get("difference"),
+            "recommended_action": record.get("recommended_action"),
+            "review_status": record.get("review_status", ReviewState.PENDING.value),
+            "reason": record.get("exception_type"),
+            "review_history": record.get("review_history", []),
+            "transaction": self._transaction_payload(transaction_id) if transaction_id else None,
+        }
+
+    def _find_exception_record(self, exception_id: str) -> Optional[Dict[str, Any]]:
+        for record in self.audit_store._read():
+            if record.get("exception_id") == exception_id or record.get("audit_id") == exception_id:
+                return record
+        return None
+
+    def _severity_from_exception(self, exception_type: Optional[str]) -> str:
+        if exception_type in {"amount_mismatch", "status_mismatch", "date_mismatch"}:
+            return "MEDIUM"
+        if exception_type in {"missing_bank", "missing_ledger", "missing_payment"}:
+            return "HIGH"
+        return "LOW"
+
+    def list_transactions(self, status: Optional[str] = None, exception_type: Optional[str] = None, transaction_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        items = []
+        for result in self.results:
+            if transaction_id and result.transaction_id != transaction_id:
+                continue
+            if exception_type and result.exception_type != exception_type:
+                continue
+            if status:
+                current_status = "MATCHED" if result.matched else "EXCEPTION"
+                if current_status.upper() != status.upper():
+                    continue
+            items.append(
+                {
+                    "transaction_id": result.transaction_id,
+                    "status": "MATCHED" if result.matched else "EXCEPTION",
+                    "exception_type": result.exception_type,
+                    "match_score": result.match_score,
+                    "recommended_action": result.recommended_action,
+                    "details": result.details,
+                }
+            )
+        return items
+
+    def get_transaction(self, transaction_id: str) -> Dict[str, Any]:
+        payload = self._transaction_payload(transaction_id)
+        if not payload["source_records"] and payload["reconciliation_result"] is None:
+            raise KeyError("Transaction not found.")
+        return payload
+
+    def list_exceptions(self, exception_type: Optional[str] = None, review_status: Optional[str] = None, severity: Optional[str] = None) -> List[Dict[str, Any]]:
+        items = []
+        for record in self.audit_store._read():
+            if record.get("exception_id") is None:
+                record["exception_id"] = f"EX-{record['audit_id'].split('-')[-1]}"
+                self.audit_store.update_record(record["audit_id"], record)
+            if exception_type and record.get("exception_type") != exception_type:
+                continue
+            if review_status and record.get("review_status") != review_status.upper():
+                continue
+            if severity and self._severity_from_exception(record.get("exception_type")) != severity.upper():
+                continue
+            items.append(self._serialize_exception(record))
+        return items
+
+    def get_exception(self, exception_id: str) -> Dict[str, Any]:
+        record = self._find_exception_record(exception_id)
+        if record is None:
+            raise KeyError("Exception not found.")
+        return self._serialize_exception(record)
+
+    def investigate_exception(self, exception_id: str) -> Dict[str, Any]:
+        record = self._find_exception_record(exception_id)
+        if record is None:
+            raise KeyError("Exception not found.")
+        tx_id = record["transaction_id"]
+        payload = self._transaction_payload(tx_id)
+        investigation = self.agent.investigate_exception(
+            exception={
+                "exception_id": record.get("exception_id") or record["audit_id"],
+                "transaction_id": tx_id,
+                "exception_type": record.get("exception_type"),
+            },
+            evidence={
+                "transaction_id": tx_id,
+                "payment_amount": float(payload["normalized_values"]["payment"]) if payload["normalized_values"].get("payment") is not None else None,
+                "bank_amount": float(payload["normalized_values"]["bank"]) if payload["normalized_values"].get("bank") is not None else None,
+                "ledger_amount": float(payload["normalized_values"]["ledger"]) if payload["normalized_values"].get("ledger") is not None else None,
+                "difference": record.get("difference"),
+                "similar_transactions": [{"transaction_id": tx_id, "difference": record.get("difference")}],
+                "known_fee_rule": record.get("exception_type") == "amount_mismatch",
+            },
+            source="mock",
+        )
+        return {
+            "investigation_id": investigation["investigation_id"],
+            "exception_id": record.get("exception_id") or record["audit_id"],
+            "investigation_status": investigation["agent_status"],
+            "summary": investigation.get("summary", "Insufficient evidence."),
+            "findings": investigation.get("findings", []),
+            "evidence": investigation.get("evidence_collected", {}),
+            "possible_causes": investigation.get("possible_causes", []),
+            "most_likely_cause": investigation.get("most_likely_cause", "UNKNOWN"),
+            "confidence": investigation.get("confidence", "LOW"),
+            "recommended_action": investigation.get("recommendation", "Manual investigation required."),
+            "requires_human_review": investigation.get("requires_human_review", True),
+        }
+
+    def review_exception(self, exception_id: str, decision: str, reviewer: str, comment: str) -> Dict[str, Any]:
+        record = self._find_exception_record(exception_id)
+        if record is None:
+            raise KeyError("Exception not found.")
+        target = record["audit_id"]
+        updated = transition_review_state(self.audit_store, target, ReviewState(decision), reviewer, comment)
+        return {
+            "exception_id": record.get("exception_id") or target,
+            "audit_id": target,
+            "review_status": updated["review_status"],
+            "review_history": updated["review_history"],
+            "reviewer": updated.get("reviewer"),
+            "comment": updated.get("reviewer_comment"),
+        }
+
+    def get_review_history(self, exception_id: str) -> List[Dict[str, Any]]:
+        record = self._find_exception_record(exception_id)
+        if record is None:
+            raise KeyError("Exception not found.")
+        return record.get("review_history", [])
+
+    def get_audit_history(self, transaction_id: str) -> Dict[str, Any]:
+        txn_records = [record for record in self.audit_store._read() if record.get("transaction_id") == transaction_id]
+        investigations = [
+            {
+                "investigation_id": item["investigation_id"],
+                "exception_id": item.get("exception_id"),
+                "status": item.get("agent_status"),
+                "summary": item.get("summary"),
+            }
+            for item in self.investigation_store._read()
+            if item.get("exception_id")
+            and any(
+                r.get("transaction_id") == transaction_id
+                and (r.get("exception_id") == item.get("exception_id") or r.get("audit_id") == item.get("exception_id"))
+                for r in txn_records
+            )
+        ]
+        return {
+            "transaction_id": transaction_id,
+            "audit_records": txn_records,
+            "exception_information": [self._serialize_exception(record) for record in txn_records],
+            "investigations": investigations,
+            "review_actions": [entry for record in txn_records for entry in record.get("review_history", [])],
+        }
+
+    def get_reconciliation_report(self) -> Dict[str, Any]:
+        return build_summary(self.results)
+
+    def get_exception_report(self) -> Dict[str, Any]:
+        return build_exception_report(self.results)
+
+    def export_exceptions(self, fmt: str = "json") -> Tuple[bytes, str]:
+        output_path = self.data_dir / f"exceptions_export.{fmt.lower()}"
+        export_exception_report(self.results, output_path, fmt=fmt.lower())
+        content = output_path.read_bytes()
+        media_type = "application/json" if fmt.lower() == "json" else "text/csv"
+        return content, media_type
+
+
+class FinanceAPI:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, data_dir: Optional[str | Path] = None) -> None:
+        self.service = FinanceService(data_dir=data_dir)
+        self.host = host
+        self.port = port
+        self._thread = None
+        self._server = ThreadingHTTPServer((host, port), self._handler_class())
+        self.port = self._server.server_address[1]
+
+    def _handler_class(self):
+        service = self.service
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self._handle_request("GET")
+
+            def do_POST(self):
+                self._handle_request("POST")
+
+            def _handle_request(self, method: str) -> None:
+                parsed = urlparse(self.path)
+                path = parsed.path
+                query = parse_qs(parsed.query)
+                body = {}
+                if method == "POST":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length:
+                        try:
+                            body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                        except json.JSONDecodeError:
+                            body = {}
+                params = {key: values[0] if values else None for key, values in query.items()}
+                try:
+                    payload, status_code, media_type = self._dispatch(path, method, params, body)
+                    self.send_response(status_code)
+                    self.send_header("Content-Type", media_type)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    if payload is not None:
+                        if media_type == "application/json":
+                            self.wfile.write(json.dumps(payload).encode("utf-8"))
+                        else:
+                            self.wfile.write(payload if isinstance(payload, bytes) else str(payload).encode("utf-8"))
+                except Exception:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "INTERNAL_SERVER_ERROR", "message": "Unexpected server error."}).encode("utf-8"))
+
+            def _dispatch(self, path: str, method: str, params: Dict[str, str], body: Dict[str, Any]):
+                if path == "/health":
+                    return {"status": "ok"}, 200, "application/json"
+                if path == "/":
+                    return {"status": "ok"}, 200, "application/json"
+                if path == "/transactions":
+                    return service.list_transactions(
+                        status=params.get("status"),
+                        exception_type=params.get("exception_type"),
+                        transaction_id=params.get("transaction_id"),
+                    ), 200, "application/json"
+                if path.startswith("/transactions/"):
+                    txn_id = path.split("/transactions/", 1)[1]
+                    if not txn_id:
+                        return {"error": "INVALID_REQUEST", "message": "Transaction ID is required."}, 400, "application/json"
+                    try:
+                        return service.get_transaction(txn_id), 200, "application/json"
+                    except KeyError:
+                        return {"error": "TRANSACTION_NOT_FOUND", "message": "Transaction not found."}, 404, "application/json"
+                if path == "/exceptions":
+                    return service.list_exceptions(
+                        exception_type=params.get("exception_type"),
+                        review_status=params.get("review_status"),
+                        severity=params.get("severity"),
+                    ), 200, "application/json"
+                if path.startswith("/exceptions/"):
+                    remainder = path.split("/exceptions/", 1)[1]
+                    if "/reviews" in remainder:
+                        exception_id = remainder.split("/reviews", 1)[0]
+                        try:
+                            return service.get_review_history(exception_id), 200, "application/json"
+                        except KeyError:
+                            return {"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}, 404, "application/json"
+                    if "/investigate" in remainder:
+                        exception_id = remainder.split("/investigate", 1)[0]
+                        try:
+                            return service.investigate_exception(exception_id), 200, "application/json"
+                        except KeyError:
+                            return {"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}, 404, "application/json"
+                    if "/review" in remainder:
+                        exception_id = remainder.split("/review", 1)[0]
+                        if method != "POST":
+                            return {"error": "INVALID_METHOD", "message": "POST is required."}, 405, "application/json"
+                        decision = str(body.get("decision") or "").upper()
+                        reviewer = str(body.get("reviewer") or "").strip()
+                        comment = str(body.get("comment") or "")
+                        if decision not in {"APPROVED", "REJECTED", "ESCALATED"}:
+                            return {"error": "INVALID_REVIEW_DECISION", "message": "Decision must be APPROVED, REJECTED, or ESCALATED."}, 400, "application/json"
+                        if not reviewer:
+                            return {"error": "VALIDATION_ERROR", "message": "Reviewer must not be empty."}, 422, "application/json"
+                        try:
+                            return service.review_exception(exception_id, decision, reviewer, comment), 200, "application/json"
+                        except KeyError:
+                            return {"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}, 404, "application/json"
+                        except ValueError as exc:
+                            return {"error": "INVALID_REVIEW_TRANSITION", "message": str(exc)}, 409, "application/json"
+                    exception_id = remainder
+                    try:
+                        return service.get_exception(exception_id), 200, "application/json"
+                    except KeyError:
+                        return {"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}, 404, "application/json"
+                if path == "/audit":
+                    return {"error": "INVALID_REQUEST", "message": "Transaction ID is required."}, 400, "application/json"
+                if path.startswith("/audit/"):
+                    transaction_id = path.split("/audit/", 1)[1]
+                    return service.get_audit_history(transaction_id), 200, "application/json"
+                if path == "/reports/reconciliation":
+                    return service.get_reconciliation_report(), 200, "application/json"
+                if path == "/reports/exceptions":
+                    return service.get_exception_report(), 200, "application/json"
+                if path == "/reports/exceptions/export":
+                    fmt = str(params.get("format") or "json").lower()
+                    if fmt not in {"json", "csv"}:
+                        return {"error": "INVALID_FORMAT", "message": "Format must be json or csv."}, 422, "application/json"
+                    data, media = service.export_exceptions(fmt)
+                    payload = json.loads(data.decode("utf-8")) if fmt == "json" else data.decode("utf-8")
+                    return payload, 200, media
+                return {"error": "NOT_FOUND", "message": "Endpoint not found."}, 404, "application/json"
+
+        return Handler
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+
+app = FinanceAPI()
+
+
+if __name__ == "__main__":
+    app.start()
+    try:
+        while True:
+            threading.Event().wait(1)
+    except KeyboardInterrupt:
+        app.stop()

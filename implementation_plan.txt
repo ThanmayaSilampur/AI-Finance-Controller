@@ -1,0 +1,195 @@
+AI Finance Controller – Implementation Plan
+
+Project goal
+Build an AI-powered finance operations system that automatically reconciles payment, bank, and ledger records; identifies mismatches and unresolved exceptions; explains likely causes; recommends actions; and produces reconciliation metrics for a batch of synthetic financial data.
+
+Primary objective
+Create a working MVP that closes one finance-ops loop with high measured accuracy, traceable decisions, and an honest exception list.
+
+Scope
+Use synthetic financial records and an MVP pipeline with three sources:
+- Payment System
+- Bank Statement
+- Internal Ledger
+
+The project should work on 50+ record batches and produce:
+- matched records
+- mismatched records
+- missing records
+- exception categories
+- likely reasons
+- recommended next actions
+- overall metrics such as match rate and unresolved exception count
+
+System flow
+Financial Records
+  -> Data Ingestion
+  -> Normalization
+  -> Record Matching
+  -> Match / Mismatch Detection
+  -> Exception Classification
+  -> AI Investigation / Explanation
+  -> Recommended Resolution
+  -> Human Review (if required)
+  -> Final Resolution
+  -> Audit Trail + Metrics
+
+Core requirements
+1. Receive financial records from multiple sources.
+2. Normalize records into a common schema.
+3. Match corresponding records across systems.
+4. Identify unmatched or conflicting records.
+5. Classify each exception.
+6. Explain likely reason for mismatch.
+7. Recommend next action.
+8. Allow human review of unresolved exceptions.
+9. Record final resolution.
+10. Output reconciliation metrics for review.
+
+Target data model
+Each transaction should be normalized into a common structure containing fields like:
+- transaction_id / reference_id
+- source_system
+- amount
+- currency
+- transaction_date
+- posting_date
+- status
+- customer_id / order_id
+- source_metadata
+
+Example normalized record
+{
+  "transaction_id": "TX1001",
+  "source_system": "payment",
+  "amount": 2500,
+  "currency": "INR",
+  "transaction_date": "2026-08-20",
+  "status": "SUCCESS"
+}
+
+Matching rules
+Use deterministic rules for matching across sources.
+Examples:
+- exact transaction ID + same amount + compatible date = strong match
+- matching reference ID + amount + date = strong match
+- same order/customer ID + amount + date = candidate match
+- status mismatch may still be a matching record with a classification
+
+Match criteria may include:
+- transaction ID or reference ID
+- amount
+- date proximity
+- customer or order ID
+- payment status
+
+Exception categories
+Support exception types including:
+- Missing record
+- Amount mismatch
+- Duplicate transaction
+- Date mismatch
+- Status mismatch
+- Fee difference
+- Partial refund / adjustment
+- Duplicate settlement / multiple postings
+
+Example mismatch logic
+If payment = 5000 and ledger = 4500:
+- expected = 5000
+- actual = 4500
+- difference = 500
+- classification = amount mismatch
+- likely reason = partial posting / data entry issue / missing adjustment
+
+AI explanation layer
+For each exception, the system should explain the mismatch in human-readable terms, such as:
+- “Bank reference matches transaction ID but amount differs by ₹500.”
+- “Ledger posted a lower amount than payment received.”
+- “Settlement appears duplicated; same reference was seen twice.”
+- “Transaction date differs by 1 day; likely bank posting delay.”
+
+Recommended resolution logic
+The system should propose next actions such as:
+- verify bank posting
+- recheck ledger entry
+- confirm duplicate settlement
+- approve fee adjustment
+- request manual review
+
+Human review workflow
+Unresolved or sensitive exceptions should be queued for manual review.
+Each exception should maintain:
+- source evidence
+- comparison result
+- classification
+- suggested action
+- reviewer decision
+- final resolution status
+
+Audit trail
+Each transaction should be auditable with:
+- original source record
+- normalized representation
+- match decision
+- exception category
+- explanation
+- review actions
+- final resolution
+
+Metrics to report
+The system should output metrics for a batch, including:
+- total records processed
+- matched count
+- mismatched count
+- missing count
+- unresolved exception count
+- match rate (%)
+- exception rate (%)
+- breakdown by exception category
+
+Implementation plan
+1. Define the shared record schema and canonical fields.
+2. Build a loader for synthetic CSV/JSON files.
+3. Normalize all records to a single structure.
+4. Implement the matching engine with deterministic rules.
+5. Classify mismatches and missing records.
+6. Add explanation and recommended action generation.
+7. Add a review and audit trail layer.
+8. Produce reconciliation summary metrics.
+9. Validate on synthetic batch data with 50+ records.
+10. Refine the exception logic and edge cases.
+
+Project structure (recommended)
+- data/
+  - synthetic_transactions.csv
+  - synthetic_bank_records.csv
+  - synthetic_ledger_records.csv
+- src/
+  - models.py
+  - ingestion.py
+  - normalization.py
+  - matching.py
+  - exceptions.py
+  - investigation.py
+  - reporting.py
+  - main.py
+- tests/
+  - test_matching.py
+  - test_exceptions.py
+  - test_reporting.py
+
+Success criteria
+The MVP is successful when it can:
+- reconcile a batch of 50+ synthetic records,
+- identify matches and mismatches with clear reasoning,
+- classify exceptions correctly,
+- produce a measured match rate,
+- list unresolved exceptions honestly,
+- and keep the process auditable for human review.
+
+Core design decision
+The project should prioritize deterministic, explainable reconciliation logic over black-box AI matching. AI can be added later to explain unusual cases, but the core matching and auditability must be rule-based and reliable.
+
+Next step
+Start implementing the project by creating the Python package structure, data model, synthetic seed data, and matching logic, then validate the flow with a sample reconciliation run.

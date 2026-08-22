@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -450,7 +451,7 @@ class FinanceAPI:
             self._thread.join(timeout=5)
 
 
-service = FinanceService()
+service = FinanceService(data_dir=os.getenv("FINANCE_DATA_DIR"))
 app = FastAPI(title="Finance Controller API")
 
 

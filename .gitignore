@@ -15,6 +15,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+frontend/node_modules/
+frontend/dist/
+
 # Project-generated artifacts
 /data/
 test_investigations*.json

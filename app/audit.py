@@ -6,6 +6,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.orm import Session
+
+from app.db.repository import DatabaseRepository
+
 
 class ReviewState(str, Enum):
     PENDING = "PENDING"
@@ -23,19 +27,54 @@ class ReviewState(str, Enum):
 
 
 class AuditStore:
-    def __init__(self, path: str | Path = "audit_records.json"):
+    def __init__(self, path: str | Path = "audit_records.json", db: Optional[Session] = None):
+        self.db = db
+        self.repo = DatabaseRepository(db) if db is not None else None
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.path.exists():
-            self.path.write_text("[]", encoding="utf-8")
+        if self.db is None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if not self.path.exists():
+                self.path.write_text("[]", encoding="utf-8")
 
     def _read(self) -> List[Dict[str, Any]]:
+        if self.repo is not None:
+            from app.db.models import AuditEventModel
+            models = self.repo.db.query(AuditEventModel).all()
+            results = []
+            for m in models:
+                exc_id = f"EX-{m.audit_id.split('-')[-1]}"
+                res = {
+                    "audit_id": m.audit_id,
+                    "exception_id": exc_id,
+                    "transaction_id": m.transaction_id,
+                    "match_status": m.match_status,
+                    "exception_type": m.exception_type,
+                    "payment_amount": float(m.payment_amount) if m.payment_amount is not None else None,
+                    "bank_amount": float(m.bank_amount) if m.bank_amount is not None else None,
+                    "ledger_amount": float(m.ledger_amount) if m.ledger_amount is not None else None,
+                    "difference": float(m.difference) if m.difference is not None else None,
+                    "recommended_action": m.recommended_action,
+                    "review_status": m.review_status,
+                    "review_history": m.review_history or [],
+                    "processing_timestamp": m.processing_timestamp.isoformat() if m.processing_timestamp else None,
+                }
+                if m.reviewer:
+                    res["reviewer"] = m.reviewer
+                if m.reviewer_comment:
+                    res["reviewer_comment"] = m.reviewer_comment
+                if m.resolution_timestamp:
+                    res["resolution_timestamp"] = m.resolution_timestamp.isoformat()
+                results.append(res)
+            return results
+
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return []
 
     def _write(self, data: List[Dict[str, Any]]) -> None:
+        if self.repo is not None:
+            return
         self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def create_record(
@@ -53,8 +92,43 @@ class AuditStore:
     ) -> Dict[str, Any]:
         records = self._read()
         audit_id = f"AUD-{len(records) + 1:03d}"
+        exc_id = f"EX-{len(records) + 1:03d}"
+
+        if self.repo is not None:
+            from decimal import Decimal
+            event = self.repo.save_audit_event(
+                audit_id=audit_id,
+                transaction_id=transaction_id,
+                match_status=match_status,
+                exception_type=exception_type,
+                payment_amount=Decimal(str(payment_amount)) if payment_amount is not None else None,
+                bank_amount=Decimal(str(bank_amount)) if bank_amount is not None else None,
+                ledger_amount=Decimal(str(ledger_amount)) if ledger_amount is not None else None,
+                difference=Decimal(str(difference)) if difference is not None else None,
+                recommended_action=recommended_action,
+                review_status=ReviewState.PENDING.value,
+                reviewer=reviewer,
+                reviewer_comment=reviewer_comment,
+            )
+            return {
+                "audit_id": event.audit_id,
+                "exception_id": exc_id,
+                "transaction_id": event.transaction_id,
+                "match_status": event.match_status,
+                "exception_type": event.exception_type,
+                "payment_amount": payment_amount,
+                "bank_amount": bank_amount,
+                "ledger_amount": ledger_amount,
+                "difference": difference,
+                "recommended_action": event.recommended_action,
+                "review_status": event.review_status,
+                "review_history": event.review_history or [],
+                "processing_timestamp": event.processing_timestamp.isoformat() if event.processing_timestamp else None,
+            }
+
         record = {
             "audit_id": audit_id,
+            "exception_id": exc_id,
             "transaction_id": transaction_id,
             "match_status": match_status,
             "exception_type": exception_type,
@@ -77,7 +151,7 @@ class AuditStore:
 
     def get_record(self, audit_id: str) -> Dict[str, Any]:
         for record in self._read():
-            if record["audit_id"] == audit_id:
+            if record["audit_id"] == audit_id or record.get("exception_id") == audit_id:
                 return record
         raise KeyError(f"No audit record found for {audit_id}")
 
@@ -85,9 +159,32 @@ class AuditStore:
         return [record for record in self._read() if record.get("review_status") == ReviewState.PENDING.value]
 
     def update_record(self, audit_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        if self.repo is not None:
+            from app.db.models import AuditEventModel
+            audit = self.repo.db.query(AuditEventModel).filter(
+                (AuditEventModel.audit_id == audit_id) | (AuditEventModel.audit_id == f"AUD-{audit_id.replace('EX-', '')}")
+            ).first()
+            if not audit:
+                raise KeyError(f"No audit record found for {audit_id}")
+            if "review_status" in updates:
+                audit.review_status = updates["review_status"]
+            if "reviewer" in updates:
+                audit.reviewer = updates["reviewer"]
+            if "reviewer_comment" in updates:
+                audit.reviewer_comment = updates["reviewer_comment"]
+            if "review_history" in updates:
+                audit.review_history = updates["review_history"]
+            if "resolution_timestamp" in updates:
+                if isinstance(updates["resolution_timestamp"], str):
+                    audit.resolution_timestamp = datetime.fromisoformat(updates["resolution_timestamp"])
+                else:
+                    audit.resolution_timestamp = updates["resolution_timestamp"]
+            self.repo.db.commit()
+            return self.get_record(audit.audit_id)
+
         records = self._read()
         for index, record in enumerate(records):
-            if record["audit_id"] == audit_id:
+            if record["audit_id"] == audit_id or record.get("exception_id") == audit_id:
                 records[index].update(updates)
                 self._write(records)
                 return records[index]

@@ -10,9 +10,11 @@ The AI Finance Controller reconciles payment, bank, and ledger records with dete
 - `app/reporting.py` builds summaries and exception exports.
 - `app/audit.py` persists review state and history.
 - `app/ai_agent.py` provides the investigation abstraction.
+- `app/db/` contains the SQLAlchemy models, repository, and dataset adapter.
+- `scripts/ingest_dataset.py` ingests an external CSV with raw-to-normalized lineage.
 - `app/api.py` exposes the existing services through FastAPI and a compatibility HTTP server.
 
-Production persistence remains local JSON storage. Set `FINANCE_DATA_DIR` to select its directory; the default is the repository `data/` directory.
+PostgreSQL is supported through `DATABASE_URL`; SQLite remains the local default. Audit, review, and investigation state use the database when a service has a database session. Deterministic three-way reconciliation remains independent of the investigation agent.
 
 ## Tech stack
 
@@ -20,7 +22,7 @@ Production persistence remains local JSON storage. Set `FINANCE_DATA_DIR` to sel
 - FastAPI and Uvicorn
 - Pydantic
 - pytest
-- JSON persistence for audit and investigation records
+- SQLAlchemy, Alembic, and PostgreSQL (with SQLite for local development)
 
 ## API
 
@@ -72,6 +74,20 @@ python -m pip install -r requirements.txt
 
 Keep `.env`, virtual environments, caches, generated data, and test artifacts outside commits. The repository `.gitignore` already excludes them.
 
+For PostgreSQL, copy `.env.example` to `.env`, set a non-default `DATABASE_URL`, then apply the schema:
+
+```powershell
+alembic upgrade head
+```
+
+To ingest an IBM AML-Data-compatible CSV while preserving raw payloads and record lineage:
+
+```powershell
+.\.venv313\Scripts\python.exe scripts\ingest_dataset.py --file data\sample_ibm_aml.csv
+```
+
+See [the data-source mapping](docs/DATA_SOURCE.md) for the source fields, transformations, and limitations.
+
 ## Run tests
 
 ```powershell
@@ -97,10 +113,10 @@ docker build -t ai-finance-controller .
 docker run --rm -p 8000:8000 ai-finance-controller
 ```
 
-To keep JSON persistence in a host directory, set `FINANCE_DATA_DIR` and mount that directory into the container:
+For PostgreSQL, use the included Compose configuration. It runs `alembic upgrade head` before starting the API:
 
 ```powershell
-docker run --rm -p 8000:8000 -e FINANCE_DATA_DIR=/app/data -v ${PWD}/data:/app/data ai-finance-controller
+docker compose up --build
 ```
 
 The image uses Python 3.13, installs from `requirements.txt`, and starts Uvicorn on port 8000. `.dockerignore` prevents local environments, secrets, caches, and generated data from entering the image.
@@ -111,9 +127,8 @@ The image uses Python 3.13, installs from `requirements.txt`, and starts Uvicorn
 
 ## Current limitations
 
-- Persistence is file-based JSON and is not designed for concurrent multi-instance production writes.
 - The investigation provider is currently a deterministic mock provider.
-- Input ingestion is file-oriented rather than a production queue or database integration.
+- Input ingestion is file-oriented; it is not yet a production queue or streaming integration.
 - The existing date normalization path emits a Python deprecation warning for date strings without a year.
 - No frontend, authentication, authorization, or automated deployment target is included.
 

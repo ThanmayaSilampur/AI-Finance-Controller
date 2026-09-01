@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from decimal import Decimal
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,29 +12,138 @@ from urllib.parse import parse_qs, urlparse
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import sessionmaker
 
 from app.ai_agent import InvestigationAgent, InvestigationStore, MockAIProvider
 from app.audit import AuditStore, ReviewState, transition_review_state
+from app.db.adapter import DataAdapter
+from app.db.models import (
+    AuditEventModel,
+    BankRecordModel,
+    ExceptionModel,
+    InvestigationModel,
+    LedgerRecordModel,
+    PaymentRecordModel,
+    ReviewModel,
+    TransactionModel,
+)
+from app.db.repository import DatabaseRepository
+from app.db.session import SessionFactory, create_db_engine
+from app.db.migration import run_migrations
 from app.matching import match_records
-from app.models import TransactionRecord
+from app.models import ReconciliationResult, TransactionRecord
 from app.normalization import normalize_records
 from app.reporting import build_exception_report, build_summary, export_exception_report as export_exception_report_helper
 from app.validation import generate_synthetic_batch
 
 
 class FinanceService:
-    def __init__(self, data_dir: Optional[str | Path] = None) -> None:
+    def __init__(self, data_dir: Optional[str | Path] = None, database_url: Optional[str] = None) -> None:
         self.data_dir = Path(data_dir) if data_dir is not None else Path(__file__).resolve().parent.parent / "data"
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.audit_store = AuditStore(path=self.data_dir / "audit_records.json")
-        self.investigation_store = InvestigationStore(path=self.data_dir / "investigations.json")
+
+        # Initialize Database engine & session
+        if database_url:
+            self.engine = create_db_engine(database_url)
+        elif data_dir is not None:
+            db_path = self.data_dir / "finance_controller.db"
+            self.engine = create_db_engine(f"sqlite:///{db_path}")
+        else:
+            self.engine = create_db_engine()
+
+        # Determine the database URL for this engine instance and run migrations.
+        # This makes Alembic the sole schema lifecycle owner: fresh databases are
+        # created by migration, existing databases are upgraded if behind head.
+        _db_url = (
+            database_url
+            if database_url
+            else (f"sqlite:///{self.data_dir / 'finance_controller.db'}" if data_dir is not None else None)
+        )
+        run_migrations(_db_url or self.engine.url.render_as_string(hide_password=False))
+
+        self.session_factory = sessionmaker(bind=self.engine)
+
+        self.db = self.session_factory()
+        self.repo = DatabaseRepository(self.db)
+
+        self.audit_store = AuditStore(path=self.data_dir / "audit_records.json", db=self.db)
+        self.investigation_store = InvestigationStore(path=self.data_dir / "investigations.json", db=self.db)
         self.agent = InvestigationAgent(store=self.investigation_store, provider=MockAIProvider())
-        self.batch = generate_synthetic_batch(60)
-        self.payment_records = self._build_records(self.batch["payment"], "payment")
-        self.bank_records = self._build_records(self.batch["bank"], "bank")
-        self.ledger_records = self._build_records(self.batch["ledger"], "ledger")
-        self.results = match_records(self.payment_records, self.bank_records, self.ledger_records)
-        self._seed_audit_records()
+
+        # Load or generate baseline batch into DB
+        self._ensure_baseline_data()
+
+    def _ensure_baseline_data(self) -> None:
+        existing_txns = self.repo.list_transactions()
+        if existing_txns:
+            self._reload_reconciliation_results()
+        else:
+            # Generate default synthetic baseline batch and save to database
+            self.batch = generate_synthetic_batch(60)
+            self.payment_records = self._build_records(self.batch["payment"], "payment")
+            self.bank_records = self._build_records(self.batch["bank"], "bank")
+            self.ledger_records = self._build_records(self.batch["ledger"], "ledger")
+
+            for p in self.payment_records:
+                self.repo.save_payment_record(p)
+                self.repo.save_normalized_transaction(p)
+            for b in self.bank_records:
+                self.repo.save_bank_record(b)
+            for l in self.ledger_records:
+                self.repo.save_ledger_record(l)
+
+            self.results = match_records(self.payment_records, self.bank_records, self.ledger_records)
+
+        if not self.audit_store._read():
+            self._seed_audit_records()
+
+    def _reload_reconciliation_results(self) -> None:
+        payments = [
+            TransactionRecord(
+                transaction_id=p.transaction_id,
+                source_system="payment",
+                amount=p.amount,
+                currency=p.currency,
+                transaction_date=p.transaction_date,
+                status=p.status,
+                reference_id=p.reference_id,
+                customer_id=p.customer_id,
+                order_id=p.order_id,
+                raw=p.raw_payload or {},
+            )
+            for p in self.db.query(PaymentRecordModel).all()
+        ]
+        banks = [
+            TransactionRecord(
+                transaction_id=b.transaction_id,
+                source_system="bank",
+                amount=b.amount,
+                currency=b.currency,
+                transaction_date=b.transaction_date,
+                status=b.status,
+                reference_id=b.reference_id,
+                raw=b.raw_payload or {},
+            )
+            for b in self.db.query(BankRecordModel).all()
+        ]
+        ledgers = [
+            TransactionRecord(
+                transaction_id=l.transaction_id,
+                source_system="ledger",
+                amount=l.amount,
+                currency=l.currency,
+                transaction_date=l.transaction_date,
+                status=l.status,
+                reference_id=l.reference_id,
+                raw=l.raw_payload or {},
+            )
+            for l in self.db.query(LedgerRecordModel).all()
+        ]
+
+        self.payment_records = payments
+        self.bank_records = banks
+        self.ledger_records = ledgers
+        self.results = match_records(payments, banks, ledgers)
 
     def _build_records(self, rows: List[dict], source_system: str) -> List[TransactionRecord]:
         records: List[TransactionRecord] = []
@@ -42,20 +152,18 @@ class FinanceService:
                 TransactionRecord(
                     transaction_id=str(row.get("transaction_id") or row.get("id") or "UNKNOWN"),
                     source_system=source_system,
-                    amount=0,
+                    amount=Decimal("0"),
                     raw=dict(row),
                 )
             )
         return normalize_records(records)
 
     def _seed_audit_records(self) -> None:
-        if self.audit_store._read():
-            return
         for result in self.results:
             if not result.exception_type:
                 continue
             record = self._build_exception_record(result)
-            self.audit_store.create_record(
+            audit_entry = self.audit_store.create_record(
                 transaction_id=record["transaction_id"],
                 match_status="EXCEPTION",
                 exception_type=record["exception_type"],
@@ -65,15 +173,29 @@ class FinanceService:
                 difference=record["difference"],
                 recommended_action=record["recommended_action"],
             )
+            exc_id = f"EX-{audit_entry['audit_id'].split('-')[-1]}"
+            self.repo.save_exception(
+                exception_id=exc_id,
+                audit_id=audit_entry["audit_id"],
+                transaction_id=record["transaction_id"],
+                exception_type=record["exception_type"],
+                recommended_action=record["recommended_action"],
+                severity=self._severity_from_exception(record["exception_type"]),
+                payment_amount=record["payment_amount"] if isinstance(record["payment_amount"], Decimal) else (Decimal(str(record["payment_amount"])) if record["payment_amount"] is not None else None),
+                bank_amount=record["bank_amount"] if isinstance(record["bank_amount"], Decimal) else (Decimal(str(record["bank_amount"])) if record["bank_amount"] is not None else None),
+                ledger_amount=record["ledger_amount"] if isinstance(record["ledger_amount"], Decimal) else (Decimal(str(record["ledger_amount"])) if record["ledger_amount"] is not None else None),
+                difference=record["difference"] if isinstance(record["difference"], Decimal) else (Decimal(str(record["difference"])) if record["difference"] is not None else None),
+                review_status="PENDING",
+            )
 
     def _build_exception_record(self, result: Any) -> Dict[str, Any]:
         payment = next((item for item in self.payment_records if item.transaction_id == result.transaction_id), None)
         bank = next((item for item in self.bank_records if item.transaction_id == result.transaction_id), None)
         ledger = next((item for item in self.ledger_records if item.transaction_id == result.transaction_id), None)
-        payment_amount = float(payment.amount) if payment else None
-        bank_amount = float(bank.amount) if bank else None
-        ledger_amount = float(ledger.amount) if ledger else None
-        difference = None
+        payment_amount = payment.amount if payment else None
+        bank_amount = bank.amount if bank else None
+        ledger_amount = ledger.amount if ledger else None
+        difference: Optional[Decimal] = None
         if payment_amount is not None and bank_amount is not None:
             difference = abs(payment_amount - bank_amount)
         elif payment_amount is not None and ledger_amount is not None:
@@ -150,8 +272,14 @@ class FinanceService:
         }
 
     def _find_exception_record(self, exception_id: str) -> Optional[Dict[str, Any]]:
+        target_num = exception_id.replace("EX-", "").replace("AUD-", "").lstrip("0")
         for record in self.audit_store._read():
-            if record.get("exception_id") == exception_id or record.get("audit_id") == exception_id:
+            rec_exc_id = record.get("exception_id") or ""
+            rec_aud_id = record.get("audit_id") or ""
+            if rec_exc_id == exception_id or rec_aud_id == exception_id:
+                return record
+            rec_num = rec_exc_id.replace("EX-", "").replace("AUD-", "").lstrip("0")
+            if rec_num and rec_num == target_num:
                 return record
         return None
 
@@ -226,9 +354,9 @@ class FinanceService:
             },
             evidence={
                 "transaction_id": tx_id,
-                "payment_amount": float(payload["normalized_values"]["payment"]) if payload["normalized_values"].get("payment") is not None else None,
-                "bank_amount": float(payload["normalized_values"]["bank"]) if payload["normalized_values"].get("bank") is not None else None,
-                "ledger_amount": float(payload["normalized_values"]["ledger"]) if payload["normalized_values"].get("ledger") is not None else None,
+                "payment_amount": Decimal(payload["normalized_values"]["payment"]) if payload["normalized_values"].get("payment") is not None else None,
+                "bank_amount": Decimal(payload["normalized_values"]["bank"]) if payload["normalized_values"].get("bank") is not None else None,
+                "ledger_amount": Decimal(payload["normalized_values"]["ledger"]) if payload["normalized_values"].get("ledger") is not None else None,
                 "difference": record.get("difference"),
                 "similar_transactions": [{"transaction_id": tx_id, "difference": record.get("difference")}],
                 "known_fee_rule": record.get("exception_type") == "amount_mismatch",
@@ -255,6 +383,16 @@ class FinanceService:
             raise KeyError("Exception not found.")
         target = record["audit_id"]
         updated = transition_review_state(self.audit_store, target, ReviewState(decision), reviewer, comment)
+
+        # Persist review in database
+        self.repo.add_review(
+            exception_id=record.get("exception_id") or target,
+            previous_state=record.get("review_status", "PENDING"),
+            new_state=decision,
+            reviewer=reviewer,
+            comment=comment,
+        )
+
         return {
             "exception_id": record.get("exception_id") or target,
             "audit_id": target,
@@ -391,13 +529,13 @@ class FinanceAPI:
                             return service.get_review_history(exception_id), 200, "application/json"
                         except KeyError:
                             return {"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}, 404, "application/json"
-                    if "/investigate" in remainder:
+                    elif "/investigate" in remainder:
                         exception_id = remainder.split("/investigate", 1)[0]
                         try:
                             return service.investigate_exception(exception_id), 200, "application/json"
                         except KeyError:
                             return {"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}, 404, "application/json"
-                    if "/review" in remainder:
+                    elif "/review" in remainder:
                         exception_id = remainder.split("/review", 1)[0]
                         if method != "POST":
                             return {"error": "INVALID_METHOD", "message": "POST is required."}, 405, "application/json"

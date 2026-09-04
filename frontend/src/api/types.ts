@@ -94,10 +94,15 @@ export interface InvestigationEvidence {
 export interface InvestigationResponse {
   investigation_id: string;
   exception_id: string;
+  exception_type?: string;
   investigation_status: 'COMPLETED' | 'INSUFFICIENT_EVIDENCE' | 'PENDING' | 'INVESTIGATING' | 'FAILED' | string;
+  diagnosis?: string;
+  likely_cause?: string;
   summary: string;
   findings: string[];
   evidence: InvestigationEvidence;
+  evidence_statements?: string[];
+  limitations?: string[];
   possible_causes: PossibleCause[];
   most_likely_cause: string;
   confidence: ConfidenceLevel;

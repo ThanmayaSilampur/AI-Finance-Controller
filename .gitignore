@@ -21,6 +21,12 @@ frontend/dist/
 # Project-generated artifacts
 /data/
 test_investigations*.json
+investigations.json
 /data/audit_records.json
 /data/investigations.json
 /data/exceptions_export.*
+data/benchmark_payment.csv
+data/benchmark_bank.csv
+data/benchmark_ledger.csv
+data/benchmark_ground_truth.json
+data/benchmark_results.json

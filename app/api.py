@@ -346,35 +346,91 @@ class FinanceService:
             raise KeyError("Exception not found.")
         tx_id = record["transaction_id"]
         payload = self._transaction_payload(tx_id)
+
+        source_records = payload.get("source_records") or {}
+        p_rec = source_records.get("payment")
+        b_rec = source_records.get("bank")
+        l_rec = source_records.get("ledger")
+
+        legs_present = [leg for leg in ["payment", "bank", "ledger"] if leg in source_records]
+        missing_legs = [leg for leg in ["payment", "bank", "ledger"] if leg not in source_records]
+
+        # Calculate or extract Decimal difference
+        p_amt = Decimal(payload["normalized_values"]["payment"]) if payload["normalized_values"].get("payment") is not None else None
+        b_amt = Decimal(payload["normalized_values"]["bank"]) if payload["normalized_values"].get("bank") is not None else None
+        l_amt = Decimal(payload["normalized_values"]["ledger"]) if payload["normalized_values"].get("ledger") is not None else None
+
+        diff: Optional[Decimal] = None
+        if record.get("difference") is not None:
+            diff = Decimal(str(record["difference"]))
+        elif p_amt is not None and b_amt is not None and p_amt != b_amt:
+            diff = abs(p_amt - b_amt)
+        elif p_amt is not None and l_amt is not None and p_amt != l_amt:
+            diff = abs(p_amt - l_amt)
+        elif b_amt is not None and l_amt is not None and b_amt != l_amt:
+            diff = abs(b_amt - l_amt)
+
+        evidence_collected = {
+            "transaction_id": tx_id,
+            "exception_type": record.get("exception_type"),
+            "payment_amount": p_amt,
+            "bank_amount": b_amt,
+            "ledger_amount": l_amt,
+            "difference": diff,
+            "payment_date": p_rec.get("transaction_date") if p_rec else None,
+            "bank_date": b_rec.get("transaction_date") if b_rec else None,
+            "ledger_date": l_rec.get("transaction_date") if l_rec else None,
+            "payment_status": p_rec.get("status") if p_rec else None,
+            "bank_status": b_rec.get("status") if b_rec else None,
+            "ledger_status": l_rec.get("status") if l_rec else None,
+            "reference_id": (p_rec or b_rec or l_rec or {}).get("reference_id"),
+            "customer_id": (p_rec or b_rec or l_rec or {}).get("customer_id"),
+            "order_id": (p_rec or b_rec or l_rec or {}).get("order_id"),
+            "legs_present": legs_present,
+            "missing_legs": missing_legs,
+            "similar_transactions": [{"transaction_id": tx_id, "difference": float(diff) if diff is not None else None}],
+            "known_fee_rule": record.get("exception_type") == "amount_mismatch",
+        }
+
         investigation = self.agent.investigate_exception(
             exception={
                 "exception_id": record.get("exception_id") or record["audit_id"],
                 "transaction_id": tx_id,
                 "exception_type": record.get("exception_type"),
             },
-            evidence={
-                "transaction_id": tx_id,
-                "payment_amount": Decimal(payload["normalized_values"]["payment"]) if payload["normalized_values"].get("payment") is not None else None,
-                "bank_amount": Decimal(payload["normalized_values"]["bank"]) if payload["normalized_values"].get("bank") is not None else None,
-                "ledger_amount": Decimal(payload["normalized_values"]["ledger"]) if payload["normalized_values"].get("ledger") is not None else None,
-                "difference": record.get("difference"),
-                "similar_transactions": [{"transaction_id": tx_id, "difference": record.get("difference")}],
-                "known_fee_rule": record.get("exception_type") == "amount_mismatch",
-            },
+            evidence=evidence_collected,
             source="mock",
         )
+
+        # Serialized evidence for JSON responses (amounts as floats or string representation for API)
+        serialized_evidence = dict(investigation.get("evidence_collected", {}))
+        for k in ["payment_amount", "bank_amount", "ledger_amount", "difference"]:
+            if serialized_evidence.get(k) is not None:
+                serialized_evidence[k] = float(serialized_evidence[k])
+
+        rec_action = investigation.get("recommended_action") or investigation.get("recommendation") or "REVIEW"
+        if rec_action == "ESCALATED":
+            rec_action = "ESCALATE"
+
         return {
             "investigation_id": investigation["investigation_id"],
             "exception_id": record.get("exception_id") or record["audit_id"],
+            "exception_type": record.get("exception_type"),
             "investigation_status": investigation["agent_status"],
+            "diagnosis": investigation.get("diagnosis") or investigation.get("summary", "Insufficient evidence."),
+            "likely_cause": investigation.get("likely_cause") or investigation.get("most_likely_cause", "UNKNOWN"),
+            "confidence": investigation.get("confidence", "LOW"),
+            "evidence": serialized_evidence,
+            "evidence_statements": investigation.get("evidence_statements", []),
+            "limitations": investigation.get("limitations", []),
+            "recommended_action": rec_action,
+            "requires_human_review": investigation.get("requires_human_review", True),
+            # Legacy backward-compatible fields
             "summary": investigation.get("summary", "Insufficient evidence."),
             "findings": investigation.get("findings", []),
-            "evidence": investigation.get("evidence_collected", {}),
             "possible_causes": investigation.get("possible_causes", []),
             "most_likely_cause": investigation.get("most_likely_cause", "UNKNOWN"),
-            "confidence": investigation.get("confidence", "LOW"),
-            "recommended_action": investigation.get("recommendation", "Manual investigation required."),
-            "requires_human_review": investigation.get("requires_human_review", True),
+            "recommendation": investigation.get("recommendation", "Manual investigation required."),
         }
 
     def review_exception(self, exception_id: str, decision: str, reviewer: str, comment: str) -> Dict[str, Any]:

@@ -22,6 +22,8 @@ import { SeverityBadge } from '../components/SeverityBadge';
 import { AIInvestigationCard } from '../components/AIInvestigationCard';
 import { ReviewActionModal } from '../components/ReviewActionModal';
 import { TransactionDetailDrawer } from '../components/TransactionDetailDrawer';
+import { ThreeWayEvidenceVisualizer } from '../components/visualizations/ThreeWayEvidenceVisualizer';
+import { InvestigationPipeline } from '../components/visualizations/InvestigationPipeline';
 
 interface ExceptionsViewProps {
   activeBatchId?: string | null;
@@ -334,25 +336,46 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
                       <span>Human Review</span>
                     </button>
 
-                    {(invResult || investigationErrors[exc.exception_id] || (exc.review_history && exc.review_history.length > 0)) && (
-                      <button
-                        onClick={() => toggleExpand(exc.exception_id)}
-                        className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                        title="Toggle Investigation & History"
-                      >
-                        {isExpanded ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
-                    )}
+                    <button
+                      onClick={() => toggleExpand(exc.exception_id)}
+                      className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                      title="Toggle 3-Way Evidence & Investigation"
+                    >
+                      {isExpanded ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
 
-                {/* Expanded Section: AI Investigation Card & Review History */}
+                {/* Expanded Section: 3-Way Parity, Lineage Pipeline, AI Card & Review History */}
                 {isExpanded && (
                   <div className="border-t border-slate-800 p-4 bg-slate-950 space-y-4">
+                    {/* 3-Way Financial Parity Comparison */}
+                    <ThreeWayEvidenceVisualizer
+                      transactionId={exc.transaction_id}
+                      sourceRecords={exc.transaction?.source_records}
+                      normalizedValues={exc.transaction?.normalized_values}
+                      exceptionType={exc.exception_type}
+                      difference={exc.difference}
+                    />
+
+                    {/* Decision Lineage Pipeline */}
+                    <InvestigationPipeline
+                      currentStage={
+                        exc.review_status !== 'PENDING'
+                          ? 'review'
+                          : invResult
+                          ? 'ai'
+                          : 'deterministic'
+                      }
+                      exceptionType={exc.exception_type}
+                      variance={exc.difference}
+                      aiStatus={invResult ? invResult.investigation_status : isInvestigating ? 'Investigating...' : null}
+                      reviewStatus={exc.review_status}
+                    />
                     {/* Render AI Investigation Error if unconfigured/failed */}
                     {investigationErrors[exc.exception_id] && (() => {
                       const errMsg = investigationErrors[exc.exception_id];

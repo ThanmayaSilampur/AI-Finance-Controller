@@ -13,6 +13,7 @@ import {
 import { api } from '../api/client';
 import { SourceRecord, TransactionDetail } from '../api/types';
 import { StatusBadge } from './StatusBadge';
+import { ThreeWayEvidenceVisualizer } from './visualizations/ThreeWayEvidenceVisualizer';
 
 interface TransactionDetailDrawerProps {
   transactionId: string | null;
@@ -216,10 +217,23 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
                 </div>
               )}
 
+              {/* 3-Way Parity Visualizer */}
+              <ThreeWayEvidenceVisualizer
+                transactionId={detail.transaction_id}
+                sourceRecords={detail.source_records}
+                normalizedValues={detail.normalized_values}
+                exceptionType={detail.reconciliation_result?.exception_type}
+                difference={
+                  detail.reconciliation_result?.details?.difference !== undefined
+                    ? parseFloat(detail.reconciliation_result.details.difference)
+                    : null
+                }
+              />
+
               {/* 3-Way Source Comparison Grid */}
               <div>
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
-                  <span>Source System Verification</span>
+                  <span>Raw Ingested Records Breakdown</span>
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {renderSourceCard(

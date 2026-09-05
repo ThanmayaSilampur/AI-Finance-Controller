@@ -18,6 +18,8 @@ import {
 } from '../api/types';
 import { StatusBadge } from '../components/StatusBadge';
 import { SeverityBadge } from '../components/SeverityBadge';
+import { ReconciliationOutcomeChart } from '../components/visualizations/ReconciliationOutcomeChart';
+import { ExceptionBreakdownChart } from '../components/visualizations/ExceptionBreakdownChart';
 
 interface DashboardViewProps {
   activeBatchId?: string | null;
@@ -231,39 +233,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Exception Categories & Breakdown */}
-      {reconReport?.exception_breakdown && Object.keys(reconReport.exception_breakdown).length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-              Exception Classification Breakdown
-            </h3>
-            <span className="text-[11px] font-mono text-slate-500">
-              Deterministic Categorization
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {Object.entries(reconReport.exception_breakdown).map(([category, count]) => {
-              const pct = totalRecords ? ((count / totalRecords) * 100).toFixed(1) : '0';
-              return (
-                <div
-                  key={category}
-                  className="bg-slate-950 p-3 rounded-md border border-slate-855 flex flex-col justify-between"
-                >
-                  <span className="text-[11px] font-mono text-slate-400 truncate" title={category}>
-                    {category}
-                  </span>
-                  <div className="mt-2 flex items-baseline justify-between">
-                    <span className="text-lg font-bold font-mono text-white">{count}</span>
-                    <span className="text-[10px] font-mono text-slate-500">{pct}%</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Visual Analytics Telemetry: Reconciliation Outcome & Exception Breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ReconciliationOutcomeChart
+          totalRecords={totalRecords}
+          matchedCount={matchedRecords}
+          exceptionCount={exceptionCount}
+          matchRate={matchRate}
+        />
+        <ExceptionBreakdownChart
+          exceptionBreakdown={reconReport?.exception_breakdown || {}}
+          totalExceptions={exceptionCount}
+        />
+      </div>
 
       {/* Critical Triage Queue */}
       <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">

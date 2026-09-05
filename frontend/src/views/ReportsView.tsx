@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { ExceptionReport, ReconciliationReport } from '../api/types';
+import { ReconciliationOutcomeChart } from '../components/visualizations/ReconciliationOutcomeChart';
+import { ExceptionBreakdownChart } from '../components/visualizations/ExceptionBreakdownChart';
 
 interface ReportsViewProps {
   activeBatchId?: string | null;
@@ -135,6 +137,24 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ activeBatchId }) => {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Visual Analysis Breakdown */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ReconciliationOutcomeChart
+              totalRecords={reconReport?.total_records ?? 0}
+              matchedCount={reconReport?.matched ?? 0}
+              exceptionCount={reconReport?.unresolved ?? 0}
+              matchRate={reconReport?.match_rate}
+              title="Reconciliation Outcome Telemetry"
+              subtitle="Audited multi-source record parity summary"
+            />
+            <ExceptionBreakdownChart
+              exceptionBreakdown={exceptionReport?.exception_breakdown || reconReport?.exception_breakdown || {}}
+              totalExceptions={exceptionReport?.exception_count ?? reconReport?.unresolved ?? 0}
+              title="Exception Breakdown Telemetry"
+              subtitle="Deterministic rule discrepancy distribution"
+            />
+          </div>
+
           {/* Top Report Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Reconciliation Performance */}

@@ -23,6 +23,8 @@ Verification capacity — not generation speed — is the real bottleneck in fin
 ---
 
 ## How It Works
+<img width="1376" height="768" alt="system_architecture_clean" src="https://github.com/user-attachments/assets/0304d90d-4f0f-471e-80fd-c1c0ba16df9b" />
+
 
 1. **Ingest & normalize** CSVs from gateway, bank, and ledger sources.
 2. **3-way match** for exact parity, settlement tolerance, and duplicate references (8,500+ rec/s).

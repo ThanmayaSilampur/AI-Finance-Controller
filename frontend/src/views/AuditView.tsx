@@ -12,9 +12,10 @@ import { AuditTimeline } from '../components/AuditTimeline';
 
 interface AuditViewProps {
   initialTransactionId?: string | null;
+  activeBatchId?: string | null;
 }
 
-export const AuditView: React.FC<AuditViewProps> = ({ initialTransactionId }) => {
+export const AuditView: React.FC<AuditViewProps> = ({ initialTransactionId, activeBatchId }) => {
   const [transactions, setTransactions] = useState<TransactionSummary[]>([]);
   const [selectedTxnId, setSelectedTxnId] = useState<string>(initialTransactionId || '');
   const [auditData, setAuditData] = useState<AuditHistory | null>(null);
@@ -22,29 +23,34 @@ export const AuditView: React.FC<AuditViewProps> = ({ initialTransactionId }) =>
   const [error, setError] = useState<string | null>(null);
   const [showRawJson, setShowRawJson] = useState<boolean>(false);
 
-  // Load available transactions list for quick dropdown selection
+  // Load available transactions list scoped strictly to current analysis batch
   useEffect(() => {
     api
-      .getTransactions()
+      .getTransactions({ batch_id: activeBatchId || undefined })
       .then((res) => {
         setTransactions(res);
-        if (!selectedTxnId && res.length > 0) {
-          const firstException = res.find((t) => t.status === 'EXCEPTION');
-          const defaultId = firstException ? firstException.transaction_id : res[0].transaction_id;
-          setSelectedTxnId(defaultId);
+        if (res.length > 0) {
+          if (!selectedTxnId || !res.some((t) => t.transaction_id === selectedTxnId)) {
+            const firstException = res.find((t) => t.status === 'EXCEPTION');
+            const defaultId = firstException ? firstException.transaction_id : res[0].transaction_id;
+            setSelectedTxnId(defaultId);
+          }
+        } else {
+          setSelectedTxnId('');
+          setAuditData(null);
         }
       })
       .catch((err) => {
         setError(err.message || 'Failed to load transaction index.');
       });
-  }, []);
+  }, [activeBatchId]);
 
   const loadAuditHistory = async (txnId: string) => {
     if (!txnId) return;
     try {
       setIsLoadingAudit(true);
       setError(null);
-      const data = await api.getAuditHistory(txnId);
+      const data = await api.getAuditHistory(txnId, activeBatchId || undefined);
       setAuditData(data);
       setIsLoadingAudit(false);
     } catch (err: any) {
@@ -61,7 +67,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ initialTransactionId }) =>
     if (selectedTxnId) {
       loadAuditHistory(selectedTxnId);
     }
-  }, [selectedTxnId]);
+  }, [selectedTxnId, activeBatchId]);
 
   return (
     <div className="space-y-6">

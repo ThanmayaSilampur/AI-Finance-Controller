@@ -11,7 +11,11 @@ import {
 import { api, ApiError } from '../api/client';
 import { ExceptionReport, ReconciliationReport } from '../api/types';
 
-export const ReportsView: React.FC = () => {
+interface ReportsViewProps {
+  activeBatchId?: string | null;
+}
+
+export const ReportsView: React.FC<ReportsViewProps> = ({ activeBatchId }) => {
   const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null);
   const [exceptionReport, setExceptionReport] = useState<ExceptionReport | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -25,8 +29,8 @@ export const ReportsView: React.FC = () => {
       setIsLoading(true);
       setError(null);
       const [recon, exc] = await Promise.all([
-        api.getReconciliationReport(),
-        api.getExceptionReport(),
+        api.getReconciliationReport(activeBatchId || undefined),
+        api.getExceptionReport(activeBatchId || undefined),
       ]);
       setReconReport(recon);
       setExceptionReport(exc);
@@ -43,7 +47,7 @@ export const ReportsView: React.FC = () => {
 
   useEffect(() => {
     loadReports();
-  }, []);
+  }, [activeBatchId]);
 
   const handleExport = async (format: 'json' | 'csv') => {
     try {
@@ -51,7 +55,7 @@ export const ReportsView: React.FC = () => {
       if (format === 'csv') setIsExportingCsv(true);
       setExportMessage(null);
 
-      await api.exportExceptions(format);
+      await api.exportExceptions(format, activeBatchId || undefined);
 
       setExportMessage(`Successfully exported exception report as ${format.toUpperCase()}.`);
       if (format === 'json') setIsExportingJson(false);

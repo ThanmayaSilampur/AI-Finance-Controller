@@ -51,7 +51,7 @@ def test_normalize_finance_record_fields():
 
     assert normalized.amount == Decimal("2500")
     assert normalized.transaction_date.isoformat() == "2026-08-20"
-    assert normalized.status == "SUCCESS"
+    assert normalized.status == "SETTLED"
     assert normalized.reference_id == "REF2001"
     assert normalized.customer_id == "CUST2001"
     assert normalized.order_id == "ORD2001"

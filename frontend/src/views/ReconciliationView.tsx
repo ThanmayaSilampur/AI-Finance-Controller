@@ -13,12 +13,14 @@ import { StatusBadge } from '../components/StatusBadge';
 import { TransactionDetailDrawer } from '../components/TransactionDetailDrawer';
 
 interface ReconciliationViewProps {
+  activeBatchId?: string | null;
   initialStatusFilter?: string;
   selectedTransactionId?: string | null;
   onClearSelectedTransaction?: () => void;
 }
 
 export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
+  activeBatchId,
   initialStatusFilter,
   selectedTransactionId,
   onClearSelectedTransaction,
@@ -45,13 +47,15 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
     try {
       setIsLoading(true);
       setError(null);
-      const res = await api.getTransactions();
-      setTransactions(res);
+      const data = await api.getTransactions({
+        batch_id: activeBatchId || undefined,
+      });
+      setTransactions(data);
       setIsLoading(false);
     } catch (err: any) {
       setIsLoading(false);
       if (err instanceof ApiError) {
-        setError(err.message || 'Failed to load transaction reconciliation stream.');
+        setError(err.message || 'Failed to fetch reconciliation records.');
       } else {
         setError(err.message || 'Unable to connect to the Finance Controller API.');
       }
@@ -60,7 +64,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
 
   useEffect(() => {
     loadTransactions();
-  }, []);
+  }, [activeBatchId]);
 
   // Compute available exception types
   const availableExceptionTypes = useMemo(() => {

@@ -13,6 +13,19 @@ from app.audit import AuditStore
 from app.db.repository import DatabaseRepository
 
 
+import urllib.request
+import urllib.error
+
+class AIConfigurationError(RuntimeError):
+    """Raised when an AI provider is requested without valid credentials or configuration."""
+    pass
+
+
+class AIProviderError(RuntimeError):
+    """Raised when an external LLM API call fails or returns an invalid payload."""
+    pass
+
+
 class AIProvider:
     """Abstract LLM provider interface."""
 
@@ -368,17 +381,302 @@ class MockAIProvider(AIProvider):
         }
 
 
-class OpenAIProvider(AIProvider):
-    """Concrete provider wrapper for future live LLM integrations."""
+def _build_llm_prompt(exception: Dict[str, Any], evidence: Dict[str, Any]) -> str:
+    """Construct an objective, strictly evidence-based prompt containing zero ground truth."""
+    tx_id = evidence.get("transaction_id") or exception.get("transaction_id") or "UNKNOWN"
+    exc_type = evidence.get("exception_type") or exception.get("exception_type") or "unknown"
+    
+    p_amt = evidence.get("payment_amount")
+    b_amt = evidence.get("bank_amount")
+    l_amt = evidence.get("ledger_amount")
+    diff = evidence.get("difference")
+    
+    p_date = evidence.get("payment_date")
+    b_date = evidence.get("bank_date")
+    l_date = evidence.get("ledger_date")
+    
+    p_status = evidence.get("payment_status")
+    b_status = evidence.get("bank_status")
+    l_status = evidence.get("ledger_status")
+    
+    legs_present = evidence.get("legs_present", [])
+    missing_legs = evidence.get("missing_legs", [])
+    
+    prompt = f"""You are an expert AI Finance Controller conducting a rigorous, evidence-based audit investigation on a financial discrepancy.
+Analyze ONLY the observed transaction facts below. Do NOT assume, fabricate, or hallucinate details beyond these facts.
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.model = model
+### OBSERVED TRANSACTION EVIDENCE:
+- Transaction ID: {tx_id}
+- Exception Category: {exc_type}
+- Payment Gateway Record: amount={p_amt}, date={p_date}, status={p_status}
+- Bank Statement Record: amount={b_amt}, date={b_date}, status={b_status}
+- General Ledger Record: amount={l_amt}, date={l_date}, status={l_status}
+- Mathematical Variance: {diff}
+- Reporting Streams Present: {legs_present}
+- Explicitly Missing Streams: {missing_legs}
+- References: customer_id={evidence.get('customer_id')}, order_id={evidence.get('order_id')}, ref_id={evidence.get('reference_id')}
+
+### REQUIRED OUTPUT:
+Respond with a single valid JSON object containing exactly these fields:
+{{
+  "diagnosis": "Concise factual statement of the discrepancy",
+  "likely_cause": "Most probable operational reason for the variance",
+  "confidence": "HIGH" or "MEDIUM" or "LOW",
+  "findings": ["Factual observation 1", "Factual observation 2"],
+  "possible_causes": [
+    {{"cause": "Cause description", "likelihood": "HIGH"|"MEDIUM"|"LOW", "reason": "Operational justification"}}
+  ],
+  "limitations": ["Audit limitation 1", "Audit limitation 2"],
+  "recommended_action": "APPROVE" or "REVIEW" or "REJECT" or "ESCALATE"
+}}"""
+    return prompt
+
+
+def _parse_llm_json_response(raw_text: str, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    text = raw_text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AIProviderError(f"LLM did not return valid JSON: {raw_text[:200]}") from exc
+
+    exception_id = str(exception.get("exception_id") or exception.get("audit_id") or "EX-UNKNOWN")
+    exception_type = str(exception.get("exception_type") or evidence.get("exception_type") or "unresolved")
+    transaction_id = str(exception.get("transaction_id") or evidence.get("transaction_id") or "TXN-UNKNOWN")
+
+    diagnosis = data.get("diagnosis", "Transaction discrepancy detected.")
+    likely_cause = data.get("likely_cause", "Operational variance across transaction records.")
+    confidence = str(data.get("confidence", "MEDIUM")).upper()
+    if confidence not in {"HIGH", "MEDIUM", "LOW"}:
+        confidence = "MEDIUM"
+
+    findings = data.get("findings") or []
+    possible_causes = data.get("possible_causes") or []
+    limitations = data.get("limitations") or []
+    recommended_action = str(data.get("recommended_action", "REVIEW")).upper()
+    if recommended_action not in {"APPROVE", "REVIEW", "REJECT", "ESCALATE"}:
+        recommended_action = "REVIEW"
+
+    # Assemble factual evidence statements
+    p_amt = evidence.get("payment_amount")
+    b_amt = evidence.get("bank_amount")
+    l_amt = evidence.get("ledger_amount")
+    legs_present = list(evidence.get("legs_present") or [])
+    missing_legs = list(evidence.get("missing_legs") or [])
+
+    factual_evidence: List[str] = []
+    if "payment" in legs_present and p_amt is not None:
+        factual_evidence.append(f"Payment record: amount={p_amt}, status={evidence.get('payment_status')}")
+    if "bank" in legs_present and b_amt is not None:
+        factual_evidence.append(f"Bank record: amount={b_amt}, status={evidence.get('bank_status')}")
+    if "ledger" in legs_present and l_amt is not None:
+        factual_evidence.append(f"Ledger record: amount={l_amt}, status={evidence.get('ledger_status')}")
+    for m in missing_legs:
+        factual_evidence.append(f"Missing record stream: {m}")
+
+    return {
+        "exception_id": exception_id,
+        "exception_type": exception_type,
+        "transaction_id": transaction_id,
+        "diagnosis": diagnosis,
+        "likely_cause": likely_cause,
+        "confidence": confidence,
+        "evidence": factual_evidence,
+        "recommended_action": recommended_action,
+        "limitations": limitations,
+        "requires_human_review": True,
+        # Backward-compatible fields
+        "summary": diagnosis,
+        "findings": findings,
+        "possible_causes": possible_causes,
+        "most_likely_cause": likely_cause,
+        "recommendation": f"Action recommended: {recommended_action}.",
+    }
+
+
+class GeminiProvider(AIProvider):
+    """Real LLM provider using Google Gemini API."""
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        _load_env_file_if_present()
+        self.api_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
     def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
         if not self.api_key:
-            return MockAIProvider().investigate(exception, evidence)
-        raise NotImplementedError("Live LLM integration is intentionally not implemented in this backend-only stage.")
+            raise AIConfigurationError(
+                "Gemini API key is missing. Set the GEMINI_API_KEY environment variable. "
+                "Canned or rule-based fallback responses are disabled."
+            )
+
+        prompt = _build_llm_prompt(exception, evidence)
+        candidate_models = [self.model]
+        if self.model != "gemini-3.5-flash-lite":
+            candidate_models.append("gemini-3.5-flash-lite")
+        if "gemini-3.6-flash" not in candidate_models:
+            candidate_models.append("gemini-3.6-flash")
+
+        last_error = None
+        for m in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={self.api_key}"
+            body = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "response_mime_type": "application/json",
+                    "temperature": 0.1,
+                },
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return _parse_llm_json_response(raw_text, exception, evidence)
+            except urllib.error.HTTPError as exc:
+                err_msg = exc.read().decode("utf-8") if exc.fp else str(exc)
+                last_error = AIProviderError(f"Gemini API error ({m}) (HTTP {exc.code}): {err_msg}")
+                # If high demand 503 or 429, try next fallback candidate model
+                if exc.code in (503, 429, 404):
+                    continue
+                raise last_error from exc
+            except Exception as exc:
+                last_error = AIProviderError(f"Gemini connection failed ({m}): {str(exc)}")
+                continue
+
+        if last_error:
+            raise last_error
+        raise AIProviderError("Gemini investigation failed across all model attempts.")
+
+
+class OpenAIProvider(AIProvider):
+    """Real LLM provider using OpenAI API."""
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        _load_env_file_if_present()
+        self.api_key = (api_key or os.getenv("OPENAI_API_KEY") or "").strip()
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.api_key:
+            raise AIConfigurationError(
+                "OpenAI API key is missing. Set the OPENAI_API_KEY environment variable. "
+                "Canned or rule-based fallback responses are disabled."
+            )
+
+        prompt = _build_llm_prompt(exception, evidence)
+        url = "https://api.openai.com/v1/chat/completions"
+        body = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an autonomous finance operations and reconciliation controller AI. "
+                        "You analyze financial transaction discrepancies strictly based on provided evidence and output valid JSON."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            raw_text = data["choices"][0]["message"]["content"]
+            return _parse_llm_json_response(raw_text, exception, evidence)
+        except urllib.error.HTTPError as exc:
+            err_msg = exc.read().decode("utf-8") if exc.fp else str(exc)
+            raise AIProviderError(f"OpenAI API error (HTTP {exc.code}): {err_msg}") from exc
+        except Exception as exc:
+            raise AIProviderError(f"OpenAI connection failed: {str(exc)}") from exc
+
+
+def _load_env_file_if_present() -> None:
+    """Load key-value pairs from .env or .env.example into os.environ if not already set."""
+    root_dir = Path(__file__).resolve().parent.parent
+    for fname in [".env", ".env.example"]:
+        env_path = root_dir / fname
+        if env_path.is_file():
+            try:
+                for line in env_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip().strip("'\"")
+                    if key and val and key not in os.environ:
+                        os.environ[key] = val
+            except Exception:
+                pass
+
+
+class RealLLMProvider(AIProvider):
+    """Production provider that delegates to a live configured LLM (Gemini or OpenAI).
+
+    Fails explicitly with AIConfigurationError if no API keys are configured.
+    Never falls back to rule-based or mock responses in production.
+    """
+
+    def __init__(self) -> None:
+        self.reload()
+
+    def reload(self) -> None:
+        _load_env_file_if_present()
+        self.gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        self.openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if self.gemini_key:
+            self._active_provider: Optional[AIProvider] = GeminiProvider(api_key=self.gemini_key)
+            self.provider_name = "gemini-3.5-flash-lite"
+        elif self.openai_key:
+            self._active_provider = OpenAIProvider(api_key=self.openai_key)
+            self.provider_name = "gpt-4o-mini"
+        else:
+            self._active_provider = None
+            self.provider_name = "UNCONFIGURED"
+
+    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+        if self._active_provider is None and self.provider_name != "EXPLICITLY_UNCONFIGURED":
+            self.reload()
+        if self._active_provider is None:
+            raise AIConfigurationError(
+                "AI Provider is unconfigured: Neither GEMINI_API_KEY nor OPENAI_API_KEY was found "
+                "in the environment. Production requires a live LLM API key. Rule-based or canned "
+                "mock fallbacks are strictly disabled."
+            )
+        return self._active_provider.investigate(exception, evidence)
+
+
+def _make_json_safe(obj: Any) -> Any:
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(item) for item in obj]
+    return obj
 
 
 class InvestigationState:
@@ -403,26 +701,26 @@ class InvestigationStore:
         if self.repo is not None:
             from app.db.models import InvestigationModel
             models = self.repo.db.query(InvestigationModel).all()
-            results = []
-            for m in models:
-                results.append({
+            return [
+                {
                     "investigation_id": m.investigation_id,
                     "exception_id": m.exception_id,
                     "transaction_id": m.transaction_id,
-                    "timestamp": m.created_at.isoformat() if m.created_at else None,
+                    "provider": m.provider,
                     "agent_status": m.agent_status,
-                    "tools_used": m.tools_used or [],
-                    "evidence_collected": m.evidence_collected or {},
+                    "confidence": m.confidence,
+                    "summary": m.summary,
+                    "most_likely_cause": m.most_likely_cause,
                     "findings": m.findings or [],
                     "possible_causes": m.possible_causes or [],
-                    "most_likely_cause": m.most_likely_cause,
-                    "confidence": m.confidence,
+                    "evidence_collected": m.evidence_collected or {},
+                    "tools_used": m.tools_used or [],
                     "recommendation": m.recommendation,
-                    "provider": m.provider,
-                    "summary": m.summary,
                     "requires_human_review": m.requires_human_review,
-                })
-            return results
+                    "timestamp": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in models
+            ]
 
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
@@ -444,6 +742,7 @@ class InvestigationStore:
         records = self._read()
         investigation_id = f"INV-{len(records) + 1:03d}"
         transaction_id = str(evidence.get("transaction_id") or "TXN-UNKNOWN")
+        safe_evidence = _make_json_safe(evidence)
 
         if self.repo is not None:
             inv = self.repo.save_investigation(
@@ -457,7 +756,7 @@ class InvestigationStore:
                 most_likely_cause="UNKNOWN",
                 findings=[],
                 possible_causes=[],
-                evidence_collected=evidence,
+                evidence_collected=safe_evidence,
                 tools_used=tools_used,
                 recommendation="Manual investigation required.",
                 requires_human_review=True,
@@ -486,7 +785,7 @@ class InvestigationStore:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_status": InvestigationState.PENDING,
             "tools_used": tools_used,
-            "evidence_collected": evidence,
+            "evidence_collected": safe_evidence,
             "findings": [],
             "possible_causes": [],
             "most_likely_cause": "UNKNOWN",
@@ -517,7 +816,7 @@ class InvestigationStore:
             if "possible_causes" in updates:
                 inv.possible_causes = updates["possible_causes"]
             if "evidence_collected" in updates:
-                inv.evidence_collected = updates["evidence_collected"]
+                inv.evidence_collected = _make_json_safe(updates["evidence_collected"])
             if "tools_used" in updates:
                 inv.tools_used = updates["tools_used"]
             if "recommendation" in updates:
@@ -545,7 +844,7 @@ class InvestigationStore:
 class InvestigationAgent:
     def __init__(self, store: Optional[InvestigationStore] = None, provider: Optional[AIProvider] = None):
         self.store = store or InvestigationStore()
-        self.provider = provider or MockAIProvider()
+        self.provider = provider or RealLLMProvider()
 
     def get_transaction(self, transaction_id: str, records: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if records is None:
@@ -564,7 +863,7 @@ class InvestigationAgent:
     def get_reconciliation_history(self, transaction_id: str, history: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         return history or []
 
-    def investigate_exception(self, exception: Dict[str, Any], evidence: Dict[str, Any], source: str = "mock") -> Dict[str, Any]:
+    def investigate_exception(self, exception: Dict[str, Any], evidence: Dict[str, Any], source: Optional[str] = None) -> Dict[str, Any]:
         tools_used = [
             "get_transaction",
             "get_related_records",
@@ -572,9 +871,10 @@ class InvestigationAgent:
             "search_similar_transactions",
             "get_reconciliation_history",
         ]
+        provider_label = source or getattr(self.provider, "provider_name", "real_llm")
         investigation = self.store.create_investigation(
             exception_id=str(exception.get("exception_id") or exception.get("audit_id") or "EX-UNKNOWN"),
-            provider=source,
+            provider=provider_label,
             tools_used=tools_used,
             evidence=evidence,
         )
@@ -609,4 +909,4 @@ class InvestigationAgent:
 
 
 def create_default_agent() -> InvestigationAgent:
-    return InvestigationAgent(store=InvestigationStore(), provider=MockAIProvider())
+    return InvestigationAgent(store=InvestigationStore(), provider=RealLLMProvider())

@@ -8,6 +8,7 @@ import {
   ArrowRight,
   RefreshCw,
   Loader2,
+  UploadCloud,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import {
@@ -19,15 +20,19 @@ import { StatusBadge } from '../components/StatusBadge';
 import { SeverityBadge } from '../components/SeverityBadge';
 
 interface DashboardViewProps {
+  activeBatchId?: string | null;
   onNavigateToExceptions: (statusFilter?: string) => void;
   onNavigateToReconciliation: (statusFilter?: string) => void;
   onSelectTransaction: (transactionId: string) => void;
+  onNavigateToUpload?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
+  activeBatchId,
   onNavigateToExceptions,
   onNavigateToReconciliation,
   onSelectTransaction,
+  onNavigateToUpload,
 }) => {
   const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null);
   const [exceptionReport, setExceptionReport] = useState<ExceptionReport | null>(null);
@@ -40,9 +45,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       setIsLoading(true);
       setError(null);
       const [recon, exc, pending] = await Promise.all([
-        api.getReconciliationReport(),
-        api.getExceptionReport(),
-        api.getExceptions({ review_status: 'PENDING' }),
+        api.getReconciliationReport(activeBatchId || undefined),
+        api.getExceptionReport(activeBatchId || undefined),
+        api.getExceptions({ review_status: 'PENDING', batch_id: activeBatchId || undefined }),
       ]);
       setReconReport(recon);
       setExceptionReport(exc);
@@ -60,7 +65,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [activeBatchId]);
 
   if (isLoading) {
     return (
@@ -95,6 +100,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const resolvedCount = exceptionReport?.resolved_count ?? 0;
   const totalVariance = exceptionReport?.total_financial_difference ?? 0;
   const pendingCount = pendingExceptions.length;
+
+  if (totalRecords === 0) {
+    return (
+      <div className="max-w-2xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-2xl text-center space-y-6 shadow-2xl">
+        <div className="w-16 h-16 rounded-2xl bg-blue-950/60 border border-blue-800/80 flex items-center justify-center text-blue-400 mx-auto shadow-lg shadow-blue-950/50">
+          <UploadCloud className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-bold text-white tracking-tight">Finance Operations Control Center</h2>
+          <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+            The workspace starts completely empty. Ingest custom financial records by uploading Payment Gateway, Bank Statement, and General Ledger CSV exports to initiate automated 3-way reconciliation and AI exception root-cause analysis.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+          {onNavigateToUpload && (
+            <button
+              onClick={onNavigateToUpload}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-lg shadow-blue-900/30 transition"
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>Upload & Ingest Financial Batch</span>
+            </button>
+          )}
+        </div>
+        <div className="text-[11px] text-slate-500 font-mono border-t border-slate-800/80 pt-4">
+          Strict Evidence First • Production LLM Integration • Isolated by Analysis ID
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

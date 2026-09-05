@@ -36,7 +36,60 @@ def normalize_status(value: object) -> str:
     if value is None:
         return "UNKNOWN"
     text = str(value).strip().upper()
-    return text if text else "UNKNOWN"
+    if not text:
+        return "UNKNOWN"
+    return _STATUS_SYNONYM_MAP.get(text, text)
+
+
+# ---------------------------------------------------------------------------
+# Financial status synonym normalization
+# ---------------------------------------------------------------------------
+# Real-world datasets use system-specific tokens for the same semantic states:
+#   Payment gateways:  SUCCESS, CAPTURED, COMPLETED
+#   Bank statements:   POSTED, CREDITED, CLEARED, SETTLED
+#   Ledger systems:    PAID, BOOKED, RECONCILED
+#
+# Without synonym normalization, the matcher sees three distinct tokens for the
+# same terminal-success event and always raises a spurious status_mismatch.
+# ---------------------------------------------------------------------------
+_STATUS_SYNONYM_MAP: dict[str, str] = {
+    # ── Terminal success ────────────────────────────────────────────────────
+    "SUCCESS":     "SETTLED",
+    "SUCCESSFUL":  "SETTLED",
+    "CAPTURED":    "SETTLED",
+    "COMPLETED":   "SETTLED",
+    "PAID":        "SETTLED",
+    "POSTED":      "SETTLED",
+    "CREDITED":    "SETTLED",
+    "CLEARED":     "SETTLED",
+    "SETTLED":     "SETTLED",
+    "BOOKED":      "SETTLED",
+    "RECONCILED":  "SETTLED",
+    "PROCESSED":   "SETTLED",
+    "APPROVED":    "SETTLED",
+    # ── Terminal failure ────────────────────────────────────────────────────
+    "FAILED":      "FAILED",
+    "FAILURE":     "FAILED",
+    "DECLINED":    "FAILED",
+    "REJECTED":    "FAILED",
+    "REVERSED":    "FAILED",
+    "RETURNED":    "FAILED",
+    "BOUNCED":     "FAILED",
+    "CANCELLED":   "FAILED",
+    "CANCELED":    "FAILED",
+    "VOIDED":      "FAILED",
+    "VOID":        "FAILED",
+    "CHARGEBACK":  "FAILED",
+    # ── In-flight / pending ─────────────────────────────────────────────────
+    "PENDING":     "PENDING",
+    "PROCESSING":  "PENDING",
+    "INITIATED":   "PENDING",
+    "IN_PROGRESS": "PENDING",
+    "IN-PROGRESS": "PENDING",
+    "QUEUED":      "PENDING",
+    "SUBMITTED":   "PENDING",
+}
+
 
 
 def normalize_records(records: Sequence[TransactionRecord]) -> List[TransactionRecord]:

@@ -1,49 +1,35 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   LayoutDashboard,
   Scale,
   AlertTriangle,
   FileText,
   History,
-  RefreshCw,
+  UploadCloud,
+  Layers,
 } from 'lucide-react';
-import { api } from '../api/client';
+import { AnalysisBatch } from '../api/types';
 
-export type NavTab = 'dashboard' | 'reconciliation' | 'exceptions' | 'audit' | 'reports';
+export type NavTab = 'dashboard' | 'reconciliation' | 'exceptions' | 'audit' | 'reports' | 'upload';
 
 interface HeaderProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   exceptionCount?: number;
   pendingReviewCount?: number;
+  batches?: AnalysisBatch[];
+  activeBatchId?: string | null;
+  onSelectBatch?: (batchId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onSelectTab,
   pendingReviewCount = 0,
+  batches = [],
+  activeBatchId,
+  onSelectBatch,
 }) => {
-  const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
-  const [isCheckingHealth, setIsCheckingHealth] = useState<boolean>(false);
-
-  const checkHealth = async () => {
-    try {
-      setIsCheckingHealth(true);
-      const res = await api.getHealth();
-      setIsHealthy(res.status === 'ok');
-      setIsCheckingHealth(false);
-    } catch {
-      setIsHealthy(false);
-      setIsCheckingHealth(false);
-    }
-  };
-
-  useEffect(() => {
-    checkHealth();
-    const interval = setInterval(checkHealth, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
   const navItems: Array<{ id: NavTab; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'reconciliation', label: 'Reconciliation', icon: <Scale className="w-4 h-4" /> },
@@ -55,6 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
     },
     { id: 'audit', label: 'Audit Trail', icon: <History className="w-4 h-4" /> },
     { id: 'reports', label: 'Reports & Export', icon: <FileText className="w-4 h-4" /> },
+    { id: 'upload', label: 'New Analysis', icon: <UploadCloud className="w-4 h-4" /> },
   ];
 
   return (
@@ -67,47 +54,54 @@ export const Header: React.FC<HeaderProps> = ({
               ₹
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold tracking-tight text-white text-sm">
-                  AI FINANCE CONTROLLER
-                </span>
-                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
-                  Stage 10 UI
-                </span>
-              </div>
+              <span className="font-bold tracking-tight text-white text-sm block">
+                AI FINANCE CONTROLLER
+              </span>
               <span className="text-[11px] text-slate-400 block -mt-0.5 hidden sm:block">
-                3-Way Reconciliation & Governance Console
+                Dynamic Ingestion & 3-Way Reconciliation
               </span>
             </div>
           </div>
 
-          {/* Backend Health Status Monitor */}
+          {/* Current Analysis / Run Selector and + New Analysis */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={checkHealth}
-              disabled={isCheckingHealth}
-              title="Click to re-check API status"
-              className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:border-slate-700 transition"
-            >
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    isHealthy === true
-                      ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
-                      : isHealthy === false
-                      ? 'bg-rose-500 animate-ping'
-                      : 'bg-amber-500'
-                  }`}
-                />
-                <span className="font-mono text-[11px]">
-                  {isHealthy === true
-                    ? 'API ONLINE'
-                    : isHealthy === false
-                    ? 'API DISCONNECTED'
-                    : 'CONNECTING...'}
-                </span>
+            {/* Batch Selector Dropdown or Empty State */}
+            {batches.length > 0 && onSelectBatch ? (
+              <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-md px-2.5 py-1 text-xs text-slate-300">
+                <Layers className="w-3.5 h-3.5 text-blue-400" />
+                <select
+                  value={activeBatchId || ''}
+                  onChange={(e) => onSelectBatch(e.target.value)}
+                  className="bg-transparent text-slate-200 text-xs font-mono focus:outline-none cursor-pointer"
+                >
+                  {batches.map((b) => (
+                    <option key={b.batch_id} value={b.batch_id} className="bg-slate-900 text-slate-200">
+                      {b.batch_name || b.batch_id} ({b.total_records} txns, {b.match_rate}% match)
+                    </option>
+                  ))}
+                </select>
               </div>
-              <RefreshCw className={`w-3 h-3 text-slate-500 ${isCheckingHealth ? 'animate-spin' : ''}`} />
+            ) : (
+              <button
+                onClick={() => onSelectTab('upload')}
+                className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-md px-2.5 py-1 text-xs text-slate-400"
+              >
+                <Layers className="w-3.5 h-3.5 text-slate-500" />
+                <span className="font-mono text-[11px]">No Active Analysis</span>
+              </button>
+            )}
+
+            {/* Quick New Analysis Button */}
+            <button
+              onClick={() => onSelectTab('upload')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition shadow-sm ${
+                activeTab === 'upload'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-blue-600/90 hover:bg-blue-600 text-white'
+              }`}
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span>+ New Analysis</span>
             </button>
           </div>
         </div>

@@ -1,5 +1,8 @@
 import {
+  AIStatusResponse,
+  AnalysisBatch,
   AuditHistory,
+  BatchReportsResponse,
   ExceptionItem,
   ExceptionReport,
   HealthStatus,
@@ -99,16 +102,71 @@ export const api = {
     return request<HealthStatus>('/health');
   },
 
+  // Analysis Batches & Ingestion
+  async uploadAnalysis(
+    paymentFile: File,
+    bankFile: File,
+    ledgerFile: File,
+    batchName?: string
+  ): Promise<AnalysisBatch> {
+    const formData = new FormData();
+    formData.append('payment_file', paymentFile);
+    formData.append('bank_file', bankFile);
+    formData.append('ledger_file', ledgerFile);
+    if (batchName) formData.append('batch_name', batchName);
+
+    const url = `${API_BASE_URL}/analysis`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      let msg = `HTTP error ${response.status}`;
+      try {
+        const err = await response.json();
+        msg = err.detail?.message || err.message || JSON.stringify(err);
+      } catch {}
+      throw new ApiError(msg, response.status);
+    }
+    return (await response.json()) as AnalysisBatch;
+  },
+
+  async getAiStatus(): Promise<AIStatusResponse> {
+    return request<AIStatusResponse>('/ai/status');
+  },
+
+  async getBatches(): Promise<AnalysisBatch[]> {
+    return request<AnalysisBatch[]>('/analysis');
+  },
+
+  async getBatch(batchId: string): Promise<AnalysisBatch> {
+    return request<AnalysisBatch>(`/analysis/${encodeURIComponent(batchId)}`);
+  },
+
+  async getBatchTransactions(batchId: string): Promise<TransactionSummary[]> {
+    return request<TransactionSummary[]>(`/analysis/${encodeURIComponent(batchId)}/transactions`);
+  },
+
+  async getBatchExceptions(batchId: string): Promise<ExceptionItem[]> {
+    return request<ExceptionItem[]>(`/analysis/${encodeURIComponent(batchId)}/exceptions`);
+  },
+
+  async getBatchReports(batchId: string): Promise<BatchReportsResponse> {
+    return request<BatchReportsResponse>(`/analysis/${encodeURIComponent(batchId)}/reports`);
+  },
+
   // Transactions
   async getTransactions(params?: {
     status?: string;
     exception_type?: string;
     transaction_id?: string;
+    batch_id?: string;
   }): Promise<TransactionSummary[]> {
     const query = new URLSearchParams();
     if (params?.status) query.set('status', params.status);
     if (params?.exception_type) query.set('exception_type', params.exception_type);
     if (params?.transaction_id) query.set('transaction_id', params.transaction_id);
+    if (params?.batch_id) query.set('batch_id', params.batch_id);
     const qs = query.toString() ? `?${query.toString()}` : '';
     return request<TransactionSummary[]>(`/transactions${qs}`);
   },
@@ -122,11 +180,13 @@ export const api = {
     exception_type?: string;
     review_status?: string;
     severity?: string;
+    batch_id?: string;
   }): Promise<ExceptionItem[]> {
     const query = new URLSearchParams();
     if (params?.exception_type) query.set('exception_type', params.exception_type);
     if (params?.review_status) query.set('review_status', params.review_status);
     if (params?.severity) query.set('severity', params.severity);
+    if (params?.batch_id) query.set('batch_id', params.batch_id);
     const qs = query.toString() ? `?${query.toString()}` : '';
     return request<ExceptionItem[]>(`/exceptions${qs}`);
   },
@@ -153,22 +213,26 @@ export const api = {
   },
 
   // Audit
-  async getAuditHistory(transactionId: string): Promise<AuditHistory> {
-    return request<AuditHistory>(`/audit/${encodeURIComponent(transactionId)}`);
+  async getAuditHistory(transactionId: string, batchId?: string): Promise<AuditHistory> {
+    const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
+    return request<AuditHistory>(`/audit/${encodeURIComponent(transactionId)}${qs}`);
   },
 
   // Reports
-  async getReconciliationReport(): Promise<ReconciliationReport> {
-    return request<ReconciliationReport>('/reports/reconciliation');
+  async getReconciliationReport(batchId?: string): Promise<ReconciliationReport> {
+    const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
+    return request<ReconciliationReport>(`/reports/reconciliation${qs}`);
   },
 
-  async getExceptionReport(): Promise<ExceptionReport> {
-    return request<ExceptionReport>('/reports/exceptions');
+  async getExceptionReport(batchId?: string): Promise<ExceptionReport> {
+    const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
+    return request<ExceptionReport>(`/reports/exceptions${qs}`);
   },
 
   // Export triggers
-  async exportExceptions(format: 'json' | 'csv'): Promise<void> {
-    const url = `${API_BASE_URL}/reports/exceptions/export?format=${format}`;
+  async exportExceptions(format: 'json' | 'csv', batchId?: string): Promise<void> {
+    const qs = batchId ? `&batch_id=${encodeURIComponent(batchId)}` : '';
+    const url = `${API_BASE_URL}/reports/exceptions/export?format=${format}${qs}`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new ApiError(`Export failed with HTTP ${response.status}`, response.status);

@@ -5,7 +5,9 @@ import { ReconciliationView } from './views/ReconciliationView';
 import { ExceptionsView } from './views/ExceptionsView';
 import { AuditView } from './views/AuditView';
 import { ReportsView } from './views/ReportsView';
+import { NewAnalysisView } from './views/NewAnalysisView';
 import { api } from './api/client';
+import { AnalysisBatch } from './api/types';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -14,14 +16,29 @@ export const App: React.FC = () => {
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
   const [auditTransactionId, setAuditTransactionId] = useState<string | null>(null);
 
+  const [batches, setBatches] = useState<AnalysisBatch[]>([]);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [exceptionCount, setExceptionCount] = useState<number>(0);
+
+  const loadBatches = async () => {
+    try {
+      const data = await api.getBatches();
+      setBatches(data);
+      if (data.length > 0 && !activeBatchId) {
+        setActiveBatchId(data[0].batch_id);
+      }
+    } catch {
+      // Ignored for initial loading
+    }
+  };
 
   const loadHeaderMetrics = async () => {
     try {
       const [exceptions, report] = await Promise.all([
-        api.getExceptions({ review_status: 'PENDING' }),
-        api.getReconciliationReport(),
+        api.getExceptions({ review_status: 'PENDING', batch_id: activeBatchId || undefined }),
+        api.getReconciliationReport(activeBatchId || undefined),
       ]);
       setPendingCount(exceptions.length);
       setExceptionCount(report.unresolved);
@@ -31,10 +48,14 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    loadBatches();
+  }, []);
+
+  useEffect(() => {
     loadHeaderMetrics();
     const interval = setInterval(loadHeaderMetrics, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeBatchId]);
 
   const handleNavigateToExceptions = (statusFilter?: string) => {
     setExceptionStatusFilter(statusFilter || 'ALL');
@@ -56,6 +77,12 @@ export const App: React.FC = () => {
     setActiveTab('audit');
   };
 
+  const handleBatchCreated = (batch: AnalysisBatch) => {
+    setBatches((prev) => [batch, ...prev.filter((b) => b.batch_id !== batch.batch_id)]);
+    setActiveBatchId(batch.batch_id);
+    setActiveTab('dashboard');
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       <Header
@@ -63,19 +90,25 @@ export const App: React.FC = () => {
         onSelectTab={setActiveTab}
         exceptionCount={exceptionCount}
         pendingReviewCount={pendingCount}
+        batches={batches}
+        activeBatchId={activeBatchId}
+        onSelectBatch={(id) => setActiveBatchId(id)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'dashboard' && (
           <DashboardView
+            activeBatchId={activeBatchId}
             onNavigateToExceptions={handleNavigateToExceptions}
             onNavigateToReconciliation={handleNavigateToReconciliation}
             onSelectTransaction={handleSelectTransaction}
+            onNavigateToUpload={() => setActiveTab('upload')}
           />
         )}
 
         {activeTab === 'reconciliation' && (
           <ReconciliationView
+            activeBatchId={activeBatchId}
             initialStatusFilter={reconStatusFilter}
             selectedTransactionId={selectedTransactionId}
             onClearSelectedTransaction={() => setSelectedTransactionId(null)}
@@ -84,30 +117,43 @@ export const App: React.FC = () => {
 
         {activeTab === 'exceptions' && (
           <ExceptionsView
+            activeBatchId={activeBatchId}
             initialStatusFilter={exceptionStatusFilter}
             onNavigateToAudit={handleNavigateToAudit}
           />
         )}
 
         {activeTab === 'audit' && (
-          <AuditView initialTransactionId={auditTransactionId} />
+          <AuditView
+            initialTransactionId={auditTransactionId}
+            activeBatchId={activeBatchId}
+          />
         )}
 
-        {activeTab === 'reports' && <ReportsView />}
+        {activeTab === 'reports' && (
+          <ReportsView activeBatchId={activeBatchId} />
+        )}
+
+        {activeTab === 'upload' && (
+          <NewAnalysisView
+            onAnalysisComplete={handleBatchCreated}
+            onCancel={() => setActiveTab('dashboard')}
+          />
+        )}
       </main>
 
       {/* Controller Footer */}
       <footer className="bg-slate-900 border-t border-slate-800/80 py-4 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 font-mono">
           <div>
-            AI Finance Controller • Operational Stage 10 Frontend
+            AI Finance Controller • Real Dynamic Ingestion & Multi-Batch Reconciliation
           </div>
           <div className="flex items-center gap-4 text-[11px]">
             <span>FastAPI Backend (Python 3.13)</span>
             <span>•</span>
             <span>Deterministic 3-Way Engine</span>
             <span>•</span>
-            <span>Immutable Audit Store</span>
+            <span>PostgreSQL Lineage</span>
           </div>
         </div>
       </footer>

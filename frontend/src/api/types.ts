@@ -188,3 +188,32 @@ export interface ExceptionReport {
   high_value_unresolved_exceptions: ReconciliationReportResultItem[];
   detailed_exceptions: ReconciliationReportResultItem[];
 }
+
+export interface AnalysisBatch {
+  batch_id: string;
+  batch_name: string;
+  status: string;
+  created_at: string;
+  payment_filename: string | null;
+  bank_filename: string | null;
+  ledger_filename: string | null;
+  total_records: number;
+  matched_count: number;
+  exception_count: number;
+  match_rate: number;
+  processing_duration_ms: number;
+  throughput_rps: number;
+  exception_breakdown: Record<string, number>;
+  summary_metadata: Record<string, any>;
+}
+
+export interface BatchReportsResponse {
+  reconciliation: ReconciliationReport;
+  exceptions: ExceptionReport;
+}
+
+export interface AIStatusResponse {
+  status: 'CONFIGURED' | 'UNCONFIGURED';
+  provider: string;
+  requires_key: boolean;
+}

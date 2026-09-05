@@ -45,6 +45,7 @@ class AuditStore:
                 exc_id = f"EX-{m.audit_id.split('-')[-1]}"
                 res = {
                     "audit_id": m.audit_id,
+                    "batch_id": m.batch_id,
                     "exception_id": exc_id,
                     "transaction_id": m.transaction_id,
                     "match_status": m.match_status,
@@ -89,6 +90,7 @@ class AuditStore:
         recommended_action: str = "MANUAL_REVIEW",
         reviewer: Optional[str] = None,
         reviewer_comment: Optional[str] = None,
+        batch_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         records = self._read()
         audit_id = f"AUD-{len(records) + 1:03d}"
@@ -109,6 +111,7 @@ class AuditStore:
                 review_status=ReviewState.PENDING.value,
                 reviewer=reviewer,
                 reviewer_comment=reviewer_comment,
+                batch_id=batch_id,
             )
             return {
                 "audit_id": event.audit_id,

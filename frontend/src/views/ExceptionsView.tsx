@@ -24,11 +24,13 @@ import { ReviewActionModal } from '../components/ReviewActionModal';
 import { TransactionDetailDrawer } from '../components/TransactionDetailDrawer';
 
 interface ExceptionsViewProps {
+  activeBatchId?: string | null;
   initialStatusFilter?: string;
   onNavigateToAudit?: (transactionId: string) => void;
 }
 
 export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
+  activeBatchId,
   initialStatusFilter,
 }) => {
   const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
@@ -44,6 +46,7 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
   // Interactive AI & Review state per exception
   const [investigations, setInvestigations] = useState<Record<string, InvestigationResponse>>({});
   const [investigatingIds, setInvestigatingIds] = useState<Record<string, boolean>>({});
+  const [investigationErrors, setInvestigationErrors] = useState<Record<string, string>>({});
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [activeReviewException, setActiveReviewException] = useState<ExceptionItem | null>(null);
   const [drawerTxnId, setDrawerTxnId] = useState<string | null>(null);
@@ -52,7 +55,9 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
     try {
       setIsLoading(true);
       setError(null);
-      const res = await api.getExceptions();
+      const res = await api.getExceptions({
+        batch_id: activeBatchId || undefined,
+      });
       setExceptions(res);
       setIsLoading(false);
     } catch (err: any) {
@@ -67,18 +72,27 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
 
   useEffect(() => {
     loadExceptions();
-  }, []);
+  }, [activeBatchId]);
 
   const handleInvestigate = async (exceptionId: string) => {
     try {
       setInvestigatingIds((prev) => ({ ...prev, [exceptionId]: true }));
+      setInvestigationErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[exceptionId];
+        return copy;
+      });
       const inv = await api.investigateException(exceptionId);
       setInvestigations((prev) => ({ ...prev, [exceptionId]: inv }));
       setExpandedIds((prev) => ({ ...prev, [exceptionId]: true }));
       setInvestigatingIds((prev) => ({ ...prev, [exceptionId]: false }));
     } catch (err: any) {
       setInvestigatingIds((prev) => ({ ...prev, [exceptionId]: false }));
-      alert(err.message || 'AI Investigation failed.');
+      setInvestigationErrors((prev) => ({
+        ...prev,
+        [exceptionId]: err.message || 'AI Investigation failed: LLM Provider is not configured or connection failed.',
+      }));
+      setExpandedIds((prev) => ({ ...prev, [exceptionId]: true }));
     }
   };
 
@@ -320,7 +334,7 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
                       <span>Human Review</span>
                     </button>
 
-                    {(invResult || (exc.review_history && exc.review_history.length > 0)) && (
+                    {(invResult || investigationErrors[exc.exception_id] || (exc.review_history && exc.review_history.length > 0)) && (
                       <button
                         onClick={() => toggleExpand(exc.exception_id)}
                         className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
@@ -339,6 +353,39 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
                 {/* Expanded Section: AI Investigation Card & Review History */}
                 {isExpanded && (
                   <div className="border-t border-slate-800 p-4 bg-slate-950 space-y-4">
+                    {/* Render AI Investigation Error if unconfigured/failed */}
+                    {investigationErrors[exc.exception_id] && (() => {
+                      const errMsg = investigationErrors[exc.exception_id];
+                      const isUnconfigured = errMsg.toLowerCase().includes('unconfigured') || errMsg.toLowerCase().includes('not found in the environment');
+                      return (
+                        <div className={`rounded-lg border p-4 text-xs flex items-start gap-3 shadow-md ${
+                          isUnconfigured ? 'border-amber-800 bg-amber-950/40 text-amber-200' : 'border-rose-800 bg-rose-950/40 text-rose-200'
+                        }`}>
+                          <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${isUnconfigured ? 'text-amber-400' : 'text-rose-400'}`} />
+                          <div className="space-y-1.5 flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="font-semibold text-slate-100">
+                                {isUnconfigured ? 'Live AI Provider Not Configured' : 'Live AI Provider Temporary Outage'}
+                              </p>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                                isUnconfigured 
+                                  ? 'bg-amber-900/60 border-amber-700 text-amber-300' 
+                                  : 'bg-rose-900/60 border-rose-700 text-rose-300'
+                              }`}>
+                                Production Strict AI Enforcement
+                              </span>
+                            </div>
+                            <p className="font-mono text-[11px] opacity-95">{errMsg}</p>
+                            <p className="text-[11px] text-slate-400 pt-1 border-t border-slate-800">
+                              {isUnconfigured 
+                                ? 'To run real AI investigations, configure GEMINI_API_KEY or OPENAI_API_KEY in the server environment. The system strictly refuses to generate mock or fake responses.'
+                                : 'The upstream AI model returned a temporary service error (503/429). The system has automatic model failover configured. Please click "Investigate with AI" to retry.'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Render AI Result if available */}
                     {invResult && <AIInvestigationCard investigation={invResult} />}
 

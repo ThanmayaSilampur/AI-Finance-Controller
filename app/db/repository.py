@@ -8,6 +8,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AnalysisBatchModel,
     AuditEventModel,
     BankRecordModel,
     ExceptionModel,
@@ -85,6 +86,7 @@ class DatabaseRepository:
         self,
         transaction: TransactionRecord,
         raw_transaction_id: Optional[int] = None,
+        batch_id: Optional[str] = None,
     ) -> TransactionModel:
         """Insert or update normalized transaction record."""
         existing = self.db.get(TransactionModel, transaction.transaction_id)
@@ -99,12 +101,15 @@ class DatabaseRepository:
             existing.order_id = transaction.order_id
             if raw_transaction_id is not None:
                 existing.raw_transaction_id = raw_transaction_id
+            if batch_id is not None:
+                existing.batch_id = batch_id
             self.db.commit()
             self.db.refresh(existing)
             return existing
 
         model = TransactionModel(
             transaction_id=transaction.transaction_id,
+            batch_id=batch_id,
             raw_transaction_id=raw_transaction_id,
             source_system=transaction.source_system,
             amount=transaction.amount,
@@ -120,8 +125,10 @@ class DatabaseRepository:
         self.db.refresh(model)
         return model
 
-    def list_transactions(self) -> List[TransactionModel]:
+    def list_transactions(self, batch_id: Optional[str] = None) -> List[TransactionModel]:
         stmt = select(TransactionModel)
+        if batch_id:
+            stmt = stmt.where(TransactionModel.batch_id == batch_id)
         return list(self.db.execute(stmt).scalars().all())
 
     def get_transaction(self, transaction_id: str) -> Optional[TransactionModel]:
@@ -130,9 +137,10 @@ class DatabaseRepository:
     # -------------------------------------------------------------------------
     # Reconciliation Streams (Payment, Bank, Ledger)
     # -------------------------------------------------------------------------
-    def save_payment_record(self, record: TransactionRecord) -> PaymentRecordModel:
+    def save_payment_record(self, record: TransactionRecord, batch_id: Optional[str] = None) -> PaymentRecordModel:
         model = PaymentRecordModel(
             transaction_id=record.transaction_id,
+            batch_id=batch_id,
             amount=record.amount,
             currency=record.currency,
             transaction_date=record.transaction_date,
@@ -147,9 +155,10 @@ class DatabaseRepository:
         self.db.refresh(model)
         return model
 
-    def save_bank_record(self, record: TransactionRecord) -> BankRecordModel:
+    def save_bank_record(self, record: TransactionRecord, batch_id: Optional[str] = None) -> BankRecordModel:
         model = BankRecordModel(
             transaction_id=record.transaction_id,
+            batch_id=batch_id,
             amount=record.amount,
             currency=record.currency,
             transaction_date=record.transaction_date,
@@ -164,9 +173,10 @@ class DatabaseRepository:
         self.db.refresh(model)
         return model
 
-    def save_ledger_record(self, record: TransactionRecord) -> LedgerRecordModel:
+    def save_ledger_record(self, record: TransactionRecord, batch_id: Optional[str] = None) -> LedgerRecordModel:
         model = LedgerRecordModel(
             transaction_id=record.transaction_id,
+            batch_id=batch_id,
             amount=record.amount,
             currency=record.currency,
             transaction_date=record.transaction_date,
@@ -196,10 +206,13 @@ class DatabaseRepository:
         ledger_amount: Optional[Decimal] = None,
         difference: Optional[Decimal] = None,
         review_status: str = "PENDING",
+        batch_id: Optional[str] = None,
     ) -> ExceptionModel:
         existing = self.db.get(ExceptionModel, exception_id)
         if existing:
             existing.review_status = review_status
+            if batch_id is not None:
+                existing.batch_id = batch_id
             existing.updated_at = utc_now()
             self.db.commit()
             self.db.refresh(existing)
@@ -207,6 +220,7 @@ class DatabaseRepository:
 
         exc = ExceptionModel(
             exception_id=exception_id,
+            batch_id=batch_id,
             audit_id=audit_id,
             transaction_id=transaction_id,
             exception_type=exception_type,
@@ -368,6 +382,7 @@ class DatabaseRepository:
         review_status: str = "PENDING",
         reviewer: Optional[str] = None,
         reviewer_comment: Optional[str] = None,
+        batch_id: Optional[str] = None,
     ) -> AuditEventModel:
         existing = self.db.get(AuditEventModel, audit_id)
         if existing:
@@ -375,6 +390,7 @@ class DatabaseRepository:
 
         event = AuditEventModel(
             audit_id=audit_id,
+            batch_id=batch_id,
             transaction_id=transaction_id,
             match_status=match_status,
             exception_type=exception_type,
@@ -399,4 +415,68 @@ class DatabaseRepository:
 
     def list_audit_events_for_transaction(self, transaction_id: str) -> List[AuditEventModel]:
         stmt = select(AuditEventModel).where(AuditEventModel.transaction_id == transaction_id)
+        return list(self.db.execute(stmt).scalars().all())
+
+    # -------------------------------------------------------------------------
+    # Analysis Batch Layer
+    # -------------------------------------------------------------------------
+    def save_analysis_batch(
+        self,
+        batch_id: str,
+        batch_name: Optional[str] = None,
+        status: str = "COMPLETED",
+        payment_filename: Optional[str] = None,
+        bank_filename: Optional[str] = None,
+        ledger_filename: Optional[str] = None,
+        total_records: int = 0,
+        matched_count: int = 0,
+        exception_count: int = 0,
+        match_rate: Decimal = Decimal("0.00"),
+        processing_duration_ms: Decimal = Decimal("0.00"),
+        throughput_rps: Decimal = Decimal("0.00"),
+        exception_breakdown: Optional[Dict[str, Any]] = None,
+        summary_metadata: Optional[Dict[str, Any]] = None,
+    ) -> AnalysisBatchModel:
+        existing = self.db.get(AnalysisBatchModel, batch_id)
+        if existing:
+            existing.status = status
+            existing.matched_count = matched_count
+            existing.exception_count = exception_count
+            existing.match_rate = match_rate
+            existing.processing_duration_ms = processing_duration_ms
+            existing.throughput_rps = throughput_rps
+            if exception_breakdown is not None:
+                existing.exception_breakdown = exception_breakdown
+            if summary_metadata is not None:
+                existing.summary_metadata = summary_metadata
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+
+        batch = AnalysisBatchModel(
+            batch_id=batch_id,
+            batch_name=batch_name or f"Reconciliation Run {batch_id}",
+            status=status,
+            payment_filename=payment_filename,
+            bank_filename=bank_filename,
+            ledger_filename=ledger_filename,
+            total_records=total_records,
+            matched_count=matched_count,
+            exception_count=exception_count,
+            match_rate=match_rate,
+            processing_duration_ms=processing_duration_ms,
+            throughput_rps=throughput_rps,
+            exception_breakdown=exception_breakdown or {},
+            summary_metadata=summary_metadata or {},
+        )
+        self.db.add(batch)
+        self.db.commit()
+        self.db.refresh(batch)
+        return batch
+
+    def get_analysis_batch(self, batch_id: str) -> Optional[AnalysisBatchModel]:
+        return self.db.get(AnalysisBatchModel, batch_id)
+
+    def list_analysis_batches(self) -> List[AnalysisBatchModel]:
+        stmt = select(AnalysisBatchModel).order_by(AnalysisBatchModel.created_at.desc())
         return list(self.db.execute(stmt).scalars().all())

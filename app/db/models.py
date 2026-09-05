@@ -27,6 +27,26 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class AnalysisBatchModel(Base):
+    __tablename__ = "analysis_batches"
+
+    batch_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="COMPLETED", nullable=False)
+    payment_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    bank_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ledger_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    total_records: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    matched_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    exception_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    match_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+    processing_duration_ms: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"), nullable=False)
+    throughput_rps: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    exception_breakdown: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    summary_metadata: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class RawTransaction(Base):
     __tablename__ = "raw_transactions"
 
@@ -49,6 +69,9 @@ class TransactionModel(Base):
     __tablename__ = "transactions"
 
     transaction_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("analysis_batches.batch_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     raw_transaction_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("raw_transactions.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -69,6 +92,9 @@ class PaymentRecordModel(Base):
     __tablename__ = "payment_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("analysis_batches.batch_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     transaction_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
@@ -85,6 +111,9 @@ class BankRecordModel(Base):
     __tablename__ = "bank_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("analysis_batches.batch_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     transaction_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
@@ -101,6 +130,9 @@ class LedgerRecordModel(Base):
     __tablename__ = "ledger_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("analysis_batches.batch_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     transaction_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
@@ -116,6 +148,9 @@ class ExceptionModel(Base):
     __tablename__ = "exceptions"
 
     exception_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("analysis_batches.batch_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     audit_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     transaction_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     exception_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -177,6 +212,9 @@ class AuditEventModel(Base):
     __tablename__ = "audit_events"
 
     audit_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("analysis_batches.batch_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     transaction_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     match_status: Mapped[str] = mapped_column(String(50), nullable=False)
     exception_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from decimal import Decimal
@@ -291,9 +291,17 @@ def test_audit_no_duplicate_history(db_session):
 def test_api_end_to_end(tmp_path):
     """K. API End-to-End: investigate, get result, review, audit history."""
     import urllib.request
+    from app.ai_agent import InvestigationAgent, MockAIProvider
 
     data_dir = tmp_path / "api_data_stage13"
     api = FinanceAPI(host="127.0.0.1", port=0, data_dir=data_dir)
+    api.service.create_analysis_batch(
+        payment_content="transaction_id,amount,currency,date,status,customer_id,order_id\nTX001,1000.00,INR,2026-09-01,SUCCESS,C1,O1\nTX002,200.00,INR,2026-09-01,SUCCESS,C2,O2\n",
+        bank_content="transaction_id,amount,currency,date,status,bank_name,account_id\nTX001,1000.00,INR,2026-09-01,POSTED,HDFC,A1\nTX002,150.00,INR,2026-09-01,POSTED,HDFC,A1\n",
+        ledger_content="transaction_id,amount,currency,date,status,account_code\nTX001,1000.00,INR,2026-09-01,POSTED,AC1\nTX002,200.00,INR,2026-09-01,POSTED,AC1\n",
+        batch_name="Test Seed Batch",
+    )
+    api.service.agent = InvestigationAgent(store=api.service.investigation_store, provider=MockAIProvider())
     api.start()
     base_url = f"http://127.0.0.1:{api.port}"
 

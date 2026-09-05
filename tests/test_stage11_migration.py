@@ -38,8 +38,9 @@ from scripts.ingest_dataset import ingest_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ALEMBIC_INI = REPO_ROOT / "alembic.ini"
-CURRENT_REVISION = "20260901_01"
+CURRENT_REVISION = "20260904_02"
 EXPECTED_TABLES = {
+    "analysis_batches",
     "raw_transactions",
     "transactions",
     "payment_records",

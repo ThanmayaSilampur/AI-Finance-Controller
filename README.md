@@ -58,28 +58,6 @@ When payment gateways, nodal settlement banks, and ERP ledgers diverge, financia
 
 ---
 
-## Benchmark Results (60-Record Batch)
-
-Exceeds the 50+ record challenge standard with measured accuracy and an honest exception list:
-
-| Metric | Measured Value | Standard / Target |
-|---|---|---|
-| **Batch Size** | **60 records** (180 source records across 3 legs) | 50+ records required |
-| **Engine Throughput** | **8,500+ records / second** | High-throughput batch processing |
-| **Match Rate** | **83.33%** (50 Matched / 10 Exceptions) | Fully quantified & deterministic |
-| **Exception Accuracy** | **100% precision & recall** | Zero false-negative leakage |
-| **Test Suite Coverage** | **108 / 108 tests passing** (pytest) | 100% CI pass rate |
-| **Frontend Build** | **6.83s build time**, 0 errors (	sc && vite) | Production-ready bundle |
-
-### Honest Exception Breakdown
-- mount_mismatch (4): Fee variance / MDR deductions between gateway and bank.
-- missing_ledger (2): Settled in bank, unposted journal in ERP.
-- missing_bank (2): Gateway captured, clearing pending at bank.
-- 	iming_delay (1): Bank clearing exceeded normal +2$ cutoff.
-- duplicate_reference (1): Gateway duplicate webhook collision flagged for review.
-
----
-
 ## Tech Stack
 
 - **Backend:** Python 3.13, FastAPI, SQLAlchemy 2.0, Pydantic v2, SQLite / PostgreSQL, Alembic.

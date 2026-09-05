@@ -56,8 +56,18 @@ class FinanceService:
         database_url: Optional[str] = None,
         seed_on_empty: bool = False,
     ) -> None:
-        self.data_dir = Path(data_dir) if data_dir is not None else Path(__file__).resolve().parent.parent / "data"
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        default_data_dir = Path(__file__).resolve().parent.parent / "data"
+        if data_dir is not None:
+            candidate_dir = Path(data_dir)
+            try:
+                candidate_dir.mkdir(parents=True, exist_ok=True)
+                self.data_dir = candidate_dir
+            except (PermissionError, OSError):
+                default_data_dir.mkdir(parents=True, exist_ok=True)
+                self.data_dir = default_data_dir
+        else:
+            default_data_dir.mkdir(parents=True, exist_ok=True)
+            self.data_dir = default_data_dir
 
         # Initialize Database engine & session
         if database_url:

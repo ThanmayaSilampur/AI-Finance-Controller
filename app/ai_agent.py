@@ -614,8 +614,27 @@ class OpenAIProvider(AIProvider):
 
 
 def _load_env_file_if_present() -> None:
-    """Load key-value pairs from .env or .env.example into os.environ if not already set."""
+    """Load AI provider credentials from .env or .env.example into os.environ if not set.
+
+    Only loads LLM-specific configuration keys (e.g. GEMINI_API_KEY, OPENAI_API_KEY)
+    and strictly ignores placeholders or system path/database configs (such as
+    FINANCE_DATA_DIR or DATABASE_URL).
+    """
     root_dir = Path(__file__).resolve().parent.parent
+    allowed_keys = {
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_MODEL",
+        "OPENAI_MODEL",
+        "AI_PROVIDER",
+    }
+    placeholder_values = {
+        "",
+        "your_gemini_api_key_here",
+        "your_openai_api_key_here",
+        "your_api_key_here",
+        "...",
+    }
     for fname in [".env", ".env.example"]:
         env_path = root_dir / fname
         if env_path.is_file():
@@ -627,7 +646,13 @@ def _load_env_file_if_present() -> None:
                     key, val = line.split("=", 1)
                     key = key.strip()
                     val = val.strip().strip("'\"")
-                    if key and val and key not in os.environ:
+                    if (
+                        key in allowed_keys
+                        and key not in os.environ
+                        and val
+                        and val not in placeholder_values
+                        and not val.startswith("your_")
+                    ):
                         os.environ[key] = val
             except Exception:
                 pass
@@ -693,7 +718,12 @@ class InvestigationStore:
         self.repo = DatabaseRepository(db) if db is not None else None
         self.path = Path(path)
         if self.db is None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            except (PermissionError, OSError):
+                fallback_dir = Path(__file__).resolve().parent.parent / "data"
+                fallback_dir.mkdir(parents=True, exist_ok=True)
+                self.path = fallback_dir / self.path.name
             if not self.path.exists():
                 self.path.write_text("[]", encoding="utf-8")
 

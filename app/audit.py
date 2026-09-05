@@ -32,7 +32,12 @@ class AuditStore:
         self.repo = DatabaseRepository(db) if db is not None else None
         self.path = Path(path)
         if self.db is None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            except (PermissionError, OSError):
+                fallback_dir = Path(__file__).resolve().parent.parent / "data"
+                fallback_dir.mkdir(parents=True, exist_ok=True)
+                self.path = fallback_dir / self.path.name
             if not self.path.exists():
                 self.path.write_text("[]", encoding="utf-8")
 

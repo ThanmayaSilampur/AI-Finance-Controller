@@ -1,6 +1,7 @@
 fastapi==0.115.14
 uvicorn==0.34.3
 pydantic==2.11.7
+python-multipart>=0.0.18
 pytest>=8.3,<9
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0

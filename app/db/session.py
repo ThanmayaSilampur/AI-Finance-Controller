@@ -23,8 +23,13 @@ def get_database_url() -> str:
 
     data_dir = os.getenv("FINANCE_DATA_DIR")
     if data_dir:
-        db_path = os.path.join(data_dir, "finance_controller.db")
-        return f"sqlite:///{db_path}"
+        try:
+            target_dir = os.path.abspath(data_dir)
+            os.makedirs(target_dir, exist_ok=True)
+            db_path = os.path.join(target_dir, "finance_controller.db")
+            return f"sqlite:///{db_path.replace(os.sep, '/')}"
+        except (PermissionError, OSError):
+            pass
     return "sqlite:///./data/finance_controller.db"
 
 

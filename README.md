@@ -6,105 +6,59 @@
 [![React 18](https://img.shields.io/badge/React-18.3-61DAFB.svg)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6.svg)](https://www.typescriptlang.org)
 [![Tests Passing](https://img.shields.io/badge/tests-108%20passed-success.svg)](#quick-start)
-[![Track 04](https://img.shields.io/badge/Razorpay%20Buildathon-Track%2004-orange.svg)](#problem-statement)
 
-An enterprise finance-ops control platform that closes the loop across multi-source financial records (Payment Gateway, Bank Statement, and General Ledger) by pairing a **high-throughput deterministic 3-way reconciliation engine** with an **evidence-grounded AI diagnostic agent**.
-
----
-
-## System Architecture
-
-![AI Finance Controller System Architecture](docs/images/system_architecture_clean.jpg)
+An enterprise finance-ops platform that closes the loop across multi-source records (Payment Gateway, Bank, General Ledger) using a **deterministic 3-way reconciliation engine** paired with an **evidence-grounded AI diagnostic agent**.
 
 ---
 
-## Problem Statement
+## Problem
 
-> **The 2026 Builder Consensus:** In financial operations, **verification capacity, not generation speed, is the bottleneck.** Reconciliation, settlement variance detection, and cash positioning are still performed manually in spreadsheets.
+Verification capacity — not generation speed — is the real bottleneck in finance ops. Reconciliation and settlement checks are still done by hand in spreadsheets.
 
-When payment gateways, nodal settlement banks, and ERP ledgers diverge, financial teams face manual tracing, delayed books, and unverified cash balances.
-
-**Our Approach:**
-- **Zero-Hallucination Deterministic Core:** Reconciliation and math are 100% deterministic using Python Decimal precision. LLMs **never** calculate balances or mutate ledger states.
-- **Evidence-Grounded AI Advisory:** LLMs (Gemini / OpenAI) are constrained strictly to diagnosing isolated exceptions using multi-stream evidence, signature caching, and historical human precedents.
-- **Human-in-the-Loop Governance:** Human controllers retain final authority (APPROVE, REJECT, ESCALATE) backed by an immutable audit trail.
+**Our approach:**
+- **Deterministic core** — reconciliation and math run on Python `Decimal` precision; LLMs never touch balances or mutate ledger state.
+- **Evidence-grounded AI** — LLMs only diagnose isolated exceptions using multi-stream evidence and historical precedents.
+- **Human-in-the-loop** — controllers approve, reject, or escalate, backed by an immutable audit trail.
 
 ---
 
-## The Closed Finance-Ops Loop
+## How It Works
 
-`
-[Payment Gateway]  ──┐
-[Bank Statement]   ──┼──> [Ingestion & Normalization] ──> [Deterministic 3-Way Match (8,500+ rec/s)]
-[General Ledger]   ──┘           (ISO 8601, Decimal)                      │
-                                                               ┌──────────┴──────────┐
-                                                               ▼                     ▼
-                                                        [Matched Parity]     [Honest Exceptions]
-                                                               │                     │
-                                                               ▼                     ▼
-                                                       [Cash & Books]       [AI Diagnostic Agent]
-                                                               │           (RAG Precedents & Cache)
-                                                               │                     │
-                                                               ▼                     ▼
-                                                    [Settlement Copilot] ◄── [Human Sign-Off & Audit]
-`
-
-1. **Ingest & Normalize:** Ingests dynamic CSV files from Payment Gateways, Banks, and Ledgers with schema mapping and strict Decimal precision.
-2. **Deterministic 3-Way Match:** Computes exact triple-leg parity, settlement clearing tolerance (+1 / T+2$), and duplicate reference collisions.
-3. **Honest Exception Isolation:** Automatically categorizes unmatched records (mount_mismatch, missing_bank, missing_ledger, 	iming_delay, duplicate_reference).
-4. **AI Investigation:** Autonomous agent inspects 3-stream factual evidence and retrieves past human auditor precedents to explain root causes.
-5. **Human Review & Immutable Audit:** Controllers review decisions, sign off, and record cryptographically timestamped audit entries.
-6. **Settlement Q&A Copilot:** Natural-language conversational interface over the active batch\'s cash position, discrepancies, and audit history.
+1. **Ingest & normalize** CSVs from gateway, bank, and ledger sources.
+2. **3-way match** for exact parity, settlement tolerance, and duplicate references (8,500+ rec/s).
+3. **Isolate exceptions** — mismatches, missing records, timing delays, duplicates.
+4. **AI investigates** flagged exceptions using factual evidence + past precedents.
+5. **Human review** with sign-off and audit logging.
+6. **Q&A copilot** for natural-language queries on cash position and discrepancies.
 
 ---
 
 ## Tech Stack
 
-- **Backend:** Python 3.13, FastAPI, SQLAlchemy 2.0, Pydantic v2, SQLite / PostgreSQL, Alembic.
-- **Frontend:** React 18, TypeScript 5.5, Vite, Tailwind CSS, Lucide Icons.
-- **AI Layer:** Google Gemini / OpenAI (configurable), in-memory diagnostic signature cache, RAG precedent retrieval.
+- **Backend:** Python 3.13, FastAPI, SQLAlchemy 2.0, Pydantic v2, SQLite/PostgreSQL
+- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
+- **AI:** Gemini / OpenAI (configurable), signature cache, RAG precedent retrieval
 
 ---
 
 ## Quick Start
 
-### 1. Prerequisites & Installation
-`ash
-# Clone the repository
+```bash
 git clone https://github.com/ThanmayaSilampur/AI-Finance-Controller.git
 cd AI-Finance-Controller
-
-# Set up Python virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-`
+cp .env.example .env   # add GEMINI_API_KEY / OPENAI_API_KEY (optional — mocks by default)
+```
 
-### 2. Configure Environment (Optional for Live AI)
-`ash
-cp .env.example .env
-# Add your GEMINI_API_KEY or OPENAI_API_KEY (defaults to MockAIProvider if unset)
-`
+**Run:**
+```bash
+uvicorn app.api:app --reload           # backend → localhost:8000
+cd frontend && npm install && npm run dev  # frontend → localhost:5173
+```
 
-### 3. Run Backend & Frontend
-`ash
-# Terminal 1: Backend API (FastAPI)
-uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
-
-# Terminal 2: Frontend Control Center (Vite)
-cd frontend
-npm install
-npm run dev
-`
-
-- **Web UI:** http://localhost:5173
-- **Interactive API Docs:** http://127.0.0.1:8000/docs
-
-### 4. Run Automated Tests & Benchmark
-`ash
-# Run the complete test suite (108 tests)
+**Test & benchmark:**
+```bash
 pytest
-
-# Run the CLI throughput benchmark
 python -m app.cli benchmark
-`
+```

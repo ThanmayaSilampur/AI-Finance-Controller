@@ -7,6 +7,7 @@ import {
   History,
   UploadCloud,
   Layers,
+  BrainCircuit,
 } from 'lucide-react';
 import { AnalysisBatch } from '../api/types';
 
@@ -20,6 +21,7 @@ interface HeaderProps {
   batches?: AnalysisBatch[];
   activeBatchId?: string | null;
   onSelectBatch?: (batchId: string) => void;
+  onToggleCopilot?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -29,6 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
   batches = [],
   activeBatchId,
   onSelectBatch,
+  onToggleCopilot,
 }) => {
   const navItems: Array<{ id: NavTab; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -88,6 +91,18 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Layers className="w-3.5 h-3.5 text-slate-500" />
                 <span className="font-mono text-[11px]">No Active Analysis</span>
+              </button>
+            )}
+
+            {/* Ask Copilot Button */}
+            {onToggleCopilot && (
+              <button
+                onClick={onToggleCopilot}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-750/80 shadow-sm"
+                title="Open AI Finance Copilot"
+              >
+                <BrainCircuit className="w-3.5 h-3.5 text-purple-400" />
+                <span>Ask Copilot</span>
               </button>
             )}
 

@@ -32,9 +32,26 @@ class AIProvider:
     def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
+        raise NotImplementedError
+
 
 class MockAIProvider(AIProvider):
     """Deterministic evidence-first provider for tests and local environments."""
+
+    def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
+        import re
+        txns = re.findall(r"\bTX[A-Za-z0-9_-]+\b", user_prompt)
+        excs = re.findall(r"\bEX-[A-Za-z0-9_-]+\b", user_prompt)
+        ref_text = ""
+        if txns:
+            ref_text += f" Transaction {txns[0]} parity verified."
+        if excs:
+            ref_text += f" Exception {excs[0]} investigated."
+        return (
+            f"**Deterministic Copilot Advisory**: Processed request strictly from active batch reconciliation records.{ref_text} "
+            f"All financial metrics and exception statuses are authoritative."
+        )
 
     def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
         exception_id = str(exception.get("exception_id") or exception.get("audit_id") or "EX-UNKNOWN")
@@ -559,6 +576,59 @@ class GeminiProvider(AIProvider):
             raise last_error
         raise AIProviderError("Gemini investigation failed across all model attempts.")
 
+    def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
+        if not self.api_key:
+            raise AIConfigurationError(
+                "Gemini API key is missing. Set the GEMINI_API_KEY environment variable. "
+                "Canned or rule-based fallback responses are disabled."
+            )
+        candidate_models = [self.model]
+        if self.model != "gemini-3.5-flash-lite":
+            candidate_models.append("gemini-3.5-flash-lite")
+        if "gemini-3.6-flash" not in candidate_models:
+            candidate_models.append("gemini-3.6-flash")
+
+        contents = []
+        if history:
+            for item in history:
+                role = "user" if item.get("role") == "user" else "model"
+                contents.append({"role": role, "parts": [{"text": item.get("content", "")}]})
+        contents.append({"role": "user", "parts": [{"text": user_prompt}]})
+
+        last_error = None
+        for m in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={self.api_key}"
+            body = {
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": 0.1,
+                },
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            except urllib.error.HTTPError as exc:
+                err_msg = exc.read().decode("utf-8") if exc.fp else str(exc)
+                last_error = AIProviderError(f"Gemini API error ({m}) (HTTP {exc.code}): {err_msg}")
+                if exc.code in (503, 429, 404):
+                    continue
+                raise last_error from exc
+            except Exception as exc:
+                last_error = AIProviderError(f"Gemini connection failed ({m}): {str(exc)}")
+                continue
+
+        if last_error:
+            raise last_error
+        raise AIProviderError("Gemini query failed across all candidate models.")
+
 
 class OpenAIProvider(AIProvider):
     """Real LLM provider using OpenAI API."""
@@ -606,6 +676,44 @@ class OpenAIProvider(AIProvider):
                 data = json.loads(resp.read().decode("utf-8"))
             raw_text = data["choices"][0]["message"]["content"]
             return _parse_llm_json_response(raw_text, exception, evidence)
+        except urllib.error.HTTPError as exc:
+            err_msg = exc.read().decode("utf-8") if exc.fp else str(exc)
+            raise AIProviderError(f"OpenAI API error (HTTP {exc.code}): {err_msg}") from exc
+        except Exception as exc:
+            raise AIProviderError(f"OpenAI connection failed: {str(exc)}") from exc
+
+    def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
+        if not self.api_key:
+            raise AIConfigurationError(
+                "OpenAI API key is missing. Set the OPENAI_API_KEY environment variable. "
+                "Canned or rule-based fallback responses are disabled."
+            )
+        messages = [{"role": "system", "content": system_instruction}]
+        if history:
+            for item in history:
+                role = "assistant" if item.get("role") in ("assistant", "model") else "user"
+                messages.append({"role": role, "content": item.get("content", "")})
+        messages.append({"role": "user", "content": user_prompt})
+
+        url = "https://api.openai.com/v1/chat/completions"
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.1,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
         except urllib.error.HTTPError as exc:
             err_msg = exc.read().decode("utf-8") if exc.fp else str(exc)
             raise AIProviderError(f"OpenAI API error (HTTP {exc.code}): {err_msg}") from exc
@@ -692,6 +800,79 @@ class RealLLMProvider(AIProvider):
                 "mock fallbacks are strictly disabled."
             )
         return self._active_provider.investigate(exception, evidence)
+
+    def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
+        if self._active_provider is None and self.provider_name != "EXPLICITLY_UNCONFIGURED":
+            self.reload()
+        if self._active_provider is None:
+            raise AIConfigurationError(
+                "AI Provider is unconfigured: Neither GEMINI_API_KEY nor OPENAI_API_KEY was found "
+                "in the environment. Production requires a live LLM API key. Rule-based or canned "
+                "mock fallbacks are strictly disabled."
+            )
+        return self._active_provider.query(system_instruction, user_prompt, history=history)
+
+
+class FinanceCopilotAgent:
+    """Conversational intelligence agent strictly grounded in active batch reconciliation telemetry."""
+
+    def __init__(self, provider: Optional[AIProvider] = None) -> None:
+        self.provider = provider or RealLLMProvider()
+
+    def answer_query(
+        self,
+        query: str,
+        batch_context: Dict[str, Any],
+        transaction_evidence: Optional[List[Dict[str, Any]]] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        system_instruction = (
+            "You are the AI Finance Controller Copilot for an enterprise 3-way multi-source financial reconciliation system.\n"
+            "You assist financial operations teams, auditors, and controllers by answering queries strictly "
+            "based on the verified records and reconciliation reports for the active analysis run.\n\n"
+            "CRITICAL OPERATIONAL RULES:\n"
+            "1. Ground all answers solely in the provided batch context and transaction records.\n"
+            "2. NEVER invent fake transactions, imaginary amounts, or hallucinated explanations.\n"
+            "3. If details are not available or a counterpart leg is missing, explicitly state so.\n"
+            "4. Always cite specific Transaction IDs (e.g. TXA001) and Exception IDs (e.g. EX-101).\n"
+            "5. For variances, clearly state the amounts in Payment Gateway, Bank Settlement, and General Ledger.\n"
+            "6. Present your answers clearly in GitHub-flavored Markdown with concise summaries, bullet points, and bold financial figures.\n"
+        )
+
+        user_prompt = self._build_prompt(query, batch_context, transaction_evidence)
+        raw_answer = self.provider.query(system_instruction, user_prompt, history=history)
+
+        import re
+        referenced_tx = list(dict.fromkeys(re.findall(r"\bTX[A-Za-z0-9_-]+\b", f"{query} {raw_answer}")))
+        referenced_ex = list(dict.fromkeys(re.findall(r"\bEX-[A-Za-z0-9_-]+\b", f"{query} {raw_answer}")))
+
+        return {
+            "query": query,
+            "answer": raw_answer.strip(),
+            "batch_id": batch_context.get("batch_id"),
+            "referenced_transactions": referenced_tx,
+            "referenced_exceptions": referenced_ex,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _build_prompt(
+        self,
+        query: str,
+        batch_context: Dict[str, Any],
+        transaction_evidence: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        context_dump = json.dumps(_make_json_safe(batch_context), indent=2)
+        evidence_dump = (
+            json.dumps(_make_json_safe(transaction_evidence), indent=2)
+            if transaction_evidence
+            else "[]"
+        )
+        return (
+            f"ACTIVE ANALYSIS RUN CONTEXT:\n{context_dump}\n\n"
+            f"RELEVANT 3-WAY TRANSACTION RECORDS & EVIDENCE:\n{evidence_dump}\n\n"
+            f"USER QUERY:\n{query}\n\n"
+            f"Please provide an accurate, concise, evidence-grounded response."
+        )
 
 
 def _make_json_safe(obj: Any) -> Any:

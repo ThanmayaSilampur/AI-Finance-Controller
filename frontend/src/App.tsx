@@ -6,6 +6,7 @@ import { ExceptionsView } from './views/ExceptionsView';
 import { AuditView } from './views/AuditView';
 import { ReportsView } from './views/ReportsView';
 import { NewAnalysisView } from './views/NewAnalysisView';
+import { FinanceCopilotDrawer } from './components/FinanceCopilotDrawer';
 import { api } from './api/client';
 import { AnalysisBatch } from './api/types';
 
@@ -15,6 +16,7 @@ export const App: React.FC = () => {
   const [exceptionStatusFilter, setExceptionStatusFilter] = useState<string>('ALL');
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
   const [auditTransactionId, setAuditTransactionId] = useState<string | null>(null);
+  const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
   const [batches, setBatches] = useState<AnalysisBatch[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
@@ -93,6 +95,7 @@ export const App: React.FC = () => {
         batches={batches}
         activeBatchId={activeBatchId}
         onSelectBatch={(id) => setActiveBatchId(id)}
+        onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -141,6 +144,14 @@ export const App: React.FC = () => {
           />
         )}
       </main>
+
+      {/* AI Finance Copilot Drawer */}
+      <FinanceCopilotDrawer
+        isOpen={isCopilotOpen}
+        onClose={() => setIsCopilotOpen(false)}
+        activeBatchId={activeBatchId}
+        onSelectTransaction={handleSelectTransaction}
+      />
 
       {/* Controller Footer */}
       <footer className="bg-slate-900 border-t border-slate-800/80 py-4 mt-auto">

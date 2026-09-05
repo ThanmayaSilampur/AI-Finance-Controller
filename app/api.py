@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from app.ai_agent import (
     AIConfigurationError,
     AIProviderError,
+    FinanceCopilotAgent,
     InvestigationAgent,
     InvestigationStore,
     RealLLMProvider,
@@ -761,6 +762,81 @@ class FinanceService:
         media_type = "application/json" if fmt.lower() == "json" else "text/csv"
         return content, media_type
 
+    def answer_copilot_query(
+        self,
+        query: str,
+        batch_id: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        target_batch_id = batch_id or self.active_batch_id
+        if not target_batch_id:
+            batches = self.list_batches()
+            if batches:
+                target_batch_id = batches[0]["batch_id"]
+
+        recon_report = self.get_reconciliation_report(batch_id=target_batch_id) if target_batch_id else {}
+        exc_report = self.get_exception_report(batch_id=target_batch_id) if target_batch_id else {}
+        exceptions = self.list_exceptions(batch_id=target_batch_id) if target_batch_id else []
+
+        batch_metadata = {}
+        if target_batch_id:
+            try:
+                batch_metadata = self.get_batch(target_batch_id)
+            except Exception:
+                pass
+
+        import re
+        query_tx_ids = re.findall(r"\bTX[A-Za-z0-9_-]+\b", query)
+        query_ex_ids = re.findall(r"\bEX-[A-Za-z0-9_-]+\b", query)
+
+        relevant_txns = []
+        target_tx_set = set(query_tx_ids)
+        for ex in exceptions:
+            if ex.get("exception_id") in query_ex_ids and ex.get("transaction_id"):
+                target_tx_set.add(ex["transaction_id"])
+
+        if not target_tx_set:
+            for ex in exceptions[:5]:
+                if ex.get("transaction_id"):
+                    target_tx_set.add(ex["transaction_id"])
+
+        for tx_id in target_tx_set:
+            try:
+                tx_payload = self.get_transaction(tx_id)
+                relevant_txns.append(tx_payload)
+            except Exception:
+                pass
+
+        batch_context = {
+            "batch_id": target_batch_id,
+            "batch_name": batch_metadata.get("batch_name", "Active Run"),
+            "total_records": recon_report.get("total_records", 0),
+            "matched_count": recon_report.get("matched", 0),
+            "exception_count": recon_report.get("unresolved", 0),
+            "match_rate": recon_report.get("match_rate", 0),
+            "net_variance": exc_report.get("total_financial_difference", 0),
+            "exception_breakdown": recon_report.get("exception_breakdown", {}),
+            "exceptions_summary": [
+                {
+                    "exception_id": e.get("exception_id"),
+                    "transaction_id": e.get("transaction_id"),
+                    "exception_type": e.get("exception_type"),
+                    "difference": e.get("difference"),
+                    "review_status": e.get("review_status"),
+                    "recommended_action": e.get("recommended_action"),
+                }
+                for e in exceptions[:15]
+            ],
+        }
+
+        copilot = FinanceCopilotAgent(provider=self.agent.provider)
+        return copilot.answer_query(
+            query=query,
+            batch_context=batch_context,
+            transaction_evidence=relevant_txns,
+            history=history,
+        )
+
 
 class FinanceAPI:
     def __init__(
@@ -1000,6 +1076,32 @@ def get_ai_status() -> Dict[str, Any]:
         "provider": provider_name,
         "requires_key": not is_configured,
     }
+
+
+class CopilotQueryRequest(BaseModel):
+    query: str
+    batch_id: Optional[str] = None
+    history: Optional[List[Dict[str, str]]] = None
+
+
+@app.post("/ai/query")
+def copilot_query(req: CopilotQueryRequest) -> Dict[str, Any]:
+    try:
+        return service.answer_copilot_query(
+            query=req.query,
+            batch_id=req.batch_id,
+            history=req.history,
+        )
+    except AIConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "AI_UNCONFIGURED", "message": str(exc)},
+        ) from exc
+    except AIProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "AI_PROVIDER_ERROR", "message": str(exc)},
+        ) from exc
 
 
 @app.post("/analysis")

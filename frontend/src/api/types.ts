@@ -217,3 +217,23 @@ export interface AIStatusResponse {
   provider: string;
   requires_key: boolean;
 }
+
+export interface CopilotChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CopilotQueryRequest {
+  query: string;
+  batch_id?: string;
+  history?: CopilotChatMessage[];
+}
+
+export interface CopilotQueryResponse {
+  query: string;
+  answer: string;
+  batch_id?: string;
+  referenced_transactions: string[];
+  referenced_exceptions: string[];
+  timestamp: string;
+}

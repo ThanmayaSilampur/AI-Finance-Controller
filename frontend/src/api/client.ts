@@ -13,6 +13,8 @@ import {
   ReviewResponse,
   TransactionDetail,
   TransactionSummary,
+  CopilotQueryRequest,
+  CopilotQueryResponse,
 } from './types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -133,6 +135,13 @@ export const api = {
 
   async getAiStatus(): Promise<AIStatusResponse> {
     return request<AIStatusResponse>('/ai/status');
+  },
+
+  async queryCopilot(req: CopilotQueryRequest): Promise<CopilotQueryResponse> {
+    return request<CopilotQueryResponse>('/ai/query', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
   },
 
   async getBatches(): Promise<AnalysisBatch[]> {

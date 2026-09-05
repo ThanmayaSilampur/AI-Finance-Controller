@@ -35,9 +35,6 @@ export const AIInvestigationCard: React.FC<AIInvestigationCardProps> = ({ invest
                 {investigation.investigation_id}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Read-only advisory analysis • Deterministic backend reconciliation is authoritative
-            </p>
           </div>
         </div>
 

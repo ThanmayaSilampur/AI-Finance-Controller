@@ -127,9 +127,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           )}
         </div>
-        <div className="text-[11px] text-slate-500 font-mono border-t border-slate-800/80 pt-4">
-          Strict Evidence First • Production LLM Integration • Isolated by Analysis ID
-        </div>
       </div>
     );
   }
@@ -139,10 +136,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Executive Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Executive Reconciliation Dashboard</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Automated 3-way multi-source verification and human-in-the-loop exception governance
-          </p>
+          <h1 className="text-xl font-bold text-white tracking-tight">Reconciliation Dashboard</h1>
         </div>
         <button
           onClick={loadDashboardData}

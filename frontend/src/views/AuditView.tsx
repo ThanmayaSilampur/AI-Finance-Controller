@@ -75,9 +75,6 @@ export const AuditView: React.FC<AuditViewProps> = ({ initialTransactionId, acti
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <h1 className="text-xl font-bold text-white tracking-tight">Audit & Governance Trail</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Complete immutable transaction lifecycle, AI investigations, state transitions, and reviewer sign-offs
-          </p>
         </div>
         <button
           onClick={() => loadAuditHistory(selectedTxnId)}

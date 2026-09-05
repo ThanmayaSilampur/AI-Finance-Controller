@@ -5,7 +5,6 @@ interface ExceptionBreakdownChartProps {
   exceptionBreakdown: Record<string, number>;
   totalExceptions?: number;
   title?: string;
-  subtitle?: string;
 }
 
 // Friendly formatting for system classification keys
@@ -62,7 +61,6 @@ export const ExceptionBreakdownChart: React.FC<ExceptionBreakdownChartProps> = (
   exceptionBreakdown,
   totalExceptions: explicitTotalExceptions,
   title = 'Exception Classification Breakdown',
-  subtitle = 'Distribution by deterministic rule classification',
 }) => {
   // Filter out any 0 count items and sort descending by count
   const sortedEntries = Object.entries(exceptionBreakdown || {})
@@ -84,7 +82,6 @@ export const ExceptionBreakdownChart: React.FC<ExceptionBreakdownChartProps> = (
         </div>
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">{title}</h3>
         <p className="text-xs text-emerald-400 font-mono">No exceptions identified in this analysis run.</p>
-        <p className="text-[11px] text-slate-500">All ingested records passed 3-way reconciliation verification.</p>
       </div>
     );
   }
@@ -93,13 +90,10 @@ export const ExceptionBreakdownChart: React.FC<ExceptionBreakdownChartProps> = (
     <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-4 shadow-md">
       {/* Header */}
       <div className="border-b border-slate-800/80 pb-3 flex items-center justify-between">
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-white flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-purple-400" />
-            <span>{title}</span>
-          </h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">{subtitle}</p>
-        </div>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-white flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-purple-400" />
+          <span>{title}</span>
+        </h3>
         <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-900/60">
           Total Exceptions: <strong className="text-rose-200">{total}</strong>
         </span>

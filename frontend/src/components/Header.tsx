@@ -58,14 +58,9 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-900/40 font-bold font-mono">
               ₹
             </div>
-            <div>
-              <span className="font-bold tracking-tight text-white text-sm block">
-                AI FINANCE CONTROLLER
-              </span>
-              <span className="text-[11px] text-slate-400 block -mt-0.5 hidden sm:block">
-                Dynamic Ingestion & 3-Way Reconciliation
-              </span>
-            </div>
+            <span className="font-bold tracking-tight text-white text-sm">
+              AI FINANCE CONTROLLER
+            </span>
           </div>
 
           {/* Controls: Theme Toggle, Ask Copilot, + New Analysis */}

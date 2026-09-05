@@ -7,7 +7,6 @@ interface ReconciliationOutcomeChartProps {
   exceptionCount: number;
   matchRate?: number;
   title?: string;
-  subtitle?: string;
 }
 
 export const ReconciliationOutcomeChart: React.FC<ReconciliationOutcomeChartProps> = ({
@@ -16,7 +15,6 @@ export const ReconciliationOutcomeChart: React.FC<ReconciliationOutcomeChartProp
   exceptionCount,
   matchRate: explicitMatchRate,
   title = 'Reconciliation Outcome',
-  subtitle = 'Deterministic 3-way multi-source matching distribution',
 }) => {
   if (totalRecords === 0) {
     return (
@@ -52,13 +50,10 @@ export const ReconciliationOutcomeChart: React.FC<ReconciliationOutcomeChartProp
     <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col justify-between shadow-md">
       {/* Header */}
       <div className="border-b border-slate-800/80 pb-3 mb-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-white flex items-center gap-2">
-            <Scale className="w-4 h-4 text-blue-400" />
-            <span>{title}</span>
-          </h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">{subtitle}</p>
-        </div>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-white flex items-center gap-2">
+          <Scale className="w-4 h-4 text-blue-400" />
+          <span>{title}</span>
+        </h3>
         <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">
           Total: <strong className="text-white">{totalRecords}</strong>
         </span>

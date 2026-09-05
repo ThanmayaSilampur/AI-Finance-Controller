@@ -78,9 +78,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ activeBatchId }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <h1 className="text-xl font-bold text-white tracking-tight">Financial Reports & Exports</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Formal reconciliation telemetry, variance aggregation, and audit exports
-          </p>
         </div>
 
         {/* Export Action Controls */}
@@ -145,14 +142,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ activeBatchId }) => {
               matchedCount={reconReport?.matched ?? 0}
               exceptionCount={reconReport?.unresolved ?? 0}
               matchRate={reconReport?.match_rate}
-              title="Reconciliation Outcome Telemetry"
-              subtitle="Audited multi-source record parity summary"
+              title="Reconciliation Outcome"
             />
             <ExceptionBreakdownChart
               exceptionBreakdown={exceptionReport?.exception_breakdown || reconReport?.exception_breakdown || {}}
               totalExceptions={exceptionReport?.exception_count ?? reconReport?.unresolved ?? 0}
-              title="Exception Breakdown Telemetry"
-              subtitle="Deterministic rule discrepancy distribution"
+              title="Exception Breakdown"
             />
           </div>
 

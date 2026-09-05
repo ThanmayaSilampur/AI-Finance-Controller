@@ -175,14 +175,10 @@ export const App: React.FC = () => {
       <footer className="bg-slate-900 border-t border-slate-800/80 py-4 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 font-mono">
           <div>
-            AI Finance Controller • Real Dynamic Ingestion & Multi-Batch Reconciliation
+            AI Finance Controller
           </div>
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>FastAPI Backend (Python 3.13)</span>
-            <span>•</span>
-            <span>Deterministic 3-Way Engine</span>
-            <span>•</span>
-            <span>PostgreSQL Lineage</span>
+          <div className="text-[11px] text-slate-500">
+            Institutional Finance Operations
           </div>
         </div>
       </footer>

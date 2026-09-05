@@ -101,9 +101,6 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <h1 className="text-xl font-bold text-white tracking-tight">Reconciliation Ledger</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Deterministic 3-way matching across Payment Gateway, Bank Settlement, and Internal Ledger
-          </p>
         </div>
         <button
           onClick={loadTransactions}

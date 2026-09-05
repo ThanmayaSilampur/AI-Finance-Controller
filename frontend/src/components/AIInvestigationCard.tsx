@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { InvestigationResponse } from '../api/types';
 import { ConfidenceBadge } from './ConfidenceBadge';
+import { formatCurrency } from '../utils/formatters';
 
 interface AIInvestigationCardProps {
   investigation: InvestigationResponse;
@@ -18,11 +19,11 @@ export const AIInvestigationCard: React.FC<AIInvestigationCardProps> = ({ invest
   const isLowConfidence = investigation.confidence === 'LOW';
 
   return (
-    <div className="rounded-lg border border-blue-900/60 bg-slate-900/90 shadow-xl overflow-hidden text-slate-200">
+    <div className="rounded-xl border border-slate-800 bg-slate-900 shadow-xl overflow-hidden text-slate-200">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 px-5 py-4 border-b border-blue-800/40 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400">
+      <div className="bg-slate-900/80 px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
             <BrainCircuit className="w-5 h-5" />
           </div>
           <div>
@@ -30,7 +31,7 @@ export const AIInvestigationCard: React.FC<AIInvestigationCardProps> = ({ invest
               <h3 className="font-semibold text-white tracking-wide text-sm">
                 AI ROOT-CAUSE INVESTIGATION
               </h3>
-              <span className="text-xs px-2 py-0.5 rounded bg-blue-950 text-blue-300 font-mono border border-blue-800">
+              <span className="text-xs px-2 py-0.5 rounded bg-blue-950/70 text-blue-300 font-mono border border-blue-800/80">
                 {investigation.investigation_id}
               </span>
             </div>
@@ -50,7 +51,7 @@ export const AIInvestigationCard: React.FC<AIInvestigationCardProps> = ({ invest
 
       {/* Low Confidence / Insufficient Evidence Warning Banner */}
       {isLowConfidence && (
-        <div className="bg-amber-950/80 border-b border-amber-800/60 px-5 py-3 flex items-start gap-3 text-amber-200 text-xs">
+        <div className="bg-amber-950/70 border-b border-amber-800/60 px-5 py-3 flex items-start gap-3 text-amber-200 text-xs">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
           <div>
             <span className="font-semibold text-amber-300">INSUFFICIENT EVIDENCE DETECTED:</span>{' '}
@@ -62,7 +63,7 @@ export const AIInvestigationCard: React.FC<AIInvestigationCardProps> = ({ invest
 
       <div className="p-5 space-y-5">
         {/* SECTION 1: SOURCE FACTS & EVIDENCE EVALUATED */}
-        <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-3">
+        <div className="bg-slate-950/60 p-4 rounded-lg border border-slate-800 space-y-3">
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
               <FileSearch className="w-3.5 h-3.5 text-blue-400" />
@@ -78,33 +79,33 @@ export const AIInvestigationCard: React.FC<AIInvestigationCardProps> = ({ invest
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono pt-1">
               <div>
                 <span className="text-slate-500 block text-[11px]">Payment Amount</span>
-                <span className="text-slate-200 font-semibold">
+                <span className="text-slate-200 font-semibold tabular-nums">
                   {investigation.evidence.payment_amount !== null && investigation.evidence.payment_amount !== undefined
-                    ? `₹${investigation.evidence.payment_amount.toFixed(2)}`
+                    ? formatCurrency(investigation.evidence.payment_amount)
                     : <span className="text-rose-400">MISSING (None)</span>}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500 block text-[11px]">Bank Amount</span>
-                <span className="text-slate-200 font-semibold">
+                <span className="text-slate-200 font-semibold tabular-nums">
                   {investigation.evidence.bank_amount !== null && investigation.evidence.bank_amount !== undefined
-                    ? `₹${investigation.evidence.bank_amount.toFixed(2)}`
+                    ? formatCurrency(investigation.evidence.bank_amount)
                     : <span className="text-rose-400">MISSING (None)</span>}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500 block text-[11px]">Ledger Amount</span>
-                <span className="text-slate-200 font-semibold">
+                <span className="text-slate-200 font-semibold tabular-nums">
                   {investigation.evidence.ledger_amount !== null && investigation.evidence.ledger_amount !== undefined
-                    ? `₹${investigation.evidence.ledger_amount.toFixed(2)}`
+                    ? formatCurrency(investigation.evidence.ledger_amount)
                     : <span className="text-rose-400">MISSING (None)</span>}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500 block text-[11px]">Discrepancy</span>
-                <span className="font-semibold text-rose-400">
+                <span className="font-semibold text-rose-400 tabular-nums">
                   {investigation.evidence.difference !== null && investigation.evidence.difference !== undefined
-                    ? `₹${investigation.evidence.difference.toFixed(2)}`
+                    ? formatCurrency(investigation.evidence.difference)
                     : 'None'}
                 </span>
               </div>

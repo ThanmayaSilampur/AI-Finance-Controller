@@ -6,8 +6,9 @@ import {
   FileText,
   History,
   UploadCloud,
-  Layers,
   BrainCircuit,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { AnalysisBatch } from '../api/types';
 
@@ -22,16 +23,17 @@ interface HeaderProps {
   activeBatchId?: string | null;
   onSelectBatch?: (batchId: string) => void;
   onToggleCopilot?: () => void;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: (theme: 'dark' | 'light') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onSelectTab,
   pendingReviewCount = 0,
-  batches = [],
-  activeBatchId,
-  onSelectBatch,
   onToggleCopilot,
+  theme = 'dark',
+  onToggleTheme,
 }) => {
   const navItems: Array<{ id: NavTab; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -66,32 +68,38 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Current Analysis / Run Selector and + New Analysis */}
+          {/* Controls: Theme Toggle, Ask Copilot, + New Analysis */}
           <div className="flex items-center gap-3">
-            {/* Batch Selector Dropdown or Empty State */}
-            {batches.length > 0 && onSelectBatch ? (
-              <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-md px-2.5 py-1 text-xs text-slate-300">
-                <Layers className="w-3.5 h-3.5 text-blue-400" />
-                <select
-                  value={activeBatchId || ''}
-                  onChange={(e) => onSelectBatch(e.target.value)}
-                  className="bg-transparent text-slate-200 text-xs font-mono focus:outline-none cursor-pointer"
+            {/* Theme Toggle (Dark / Light) */}
+            {onToggleTheme && (
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-xs font-medium shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => onToggleTheme('dark')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 text-blue-400 font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Dark Theme (Current)"
                 >
-                  {batches.map((b) => (
-                    <option key={b.batch_id} value={b.batch_id} className="bg-slate-900 text-slate-200">
-                      {b.batch_name || b.batch_id} ({b.total_records} txns, {b.match_rate}% match)
-                    </option>
-                  ))}
-                </select>
+                  <Moon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-[11px]">Dark</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleTheme('light')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition ${
+                    theme === 'light'
+                      ? 'bg-slate-200 text-amber-600 font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Light Theme"
+                >
+                  <Sun className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-[11px]">Light</span>
+                </button>
               </div>
-            ) : (
-              <button
-                onClick={() => onSelectTab('upload')}
-                className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-md px-2.5 py-1 text-xs text-slate-400"
-              >
-                <Layers className="w-3.5 h-3.5 text-slate-500" />
-                <span className="font-mono text-[11px]">No Active Analysis</span>
-              </button>
             )}
 
             {/* Ask Copilot Button */}

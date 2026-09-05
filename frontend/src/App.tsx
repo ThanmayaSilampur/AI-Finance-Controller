@@ -17,6 +17,22 @@ export const App: React.FC = () => {
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
   const [auditTransactionId, setAuditTransactionId] = useState<string | null>(null);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = localStorage.getItem('finance_theme');
+    return saved === 'light' || saved === 'dark' ? saved : 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'light') {
+      root.classList.add('light');
+      root.classList.remove('dark');
+    } else {
+      root.classList.add('dark');
+      root.classList.remove('light');
+    }
+    localStorage.setItem('finance_theme', theme);
+  }, [theme]);
 
   const [batches, setBatches] = useState<AnalysisBatch[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
@@ -86,7 +102,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans ${theme}`}>
       <Header
         activeTab={activeTab}
         onSelectTab={setActiveTab}
@@ -96,6 +112,8 @@ export const App: React.FC = () => {
         activeBatchId={activeBatchId}
         onSelectBatch={(id) => setActiveBatchId(id)}
         onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
+        theme={theme}
+        onToggleTheme={(newTheme) => setTheme(newTheme)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">

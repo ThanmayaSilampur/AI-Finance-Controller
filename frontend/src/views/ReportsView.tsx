@@ -12,6 +12,7 @@ import { api, ApiError } from '../api/client';
 import { ExceptionReport, ReconciliationReport } from '../api/types';
 import { ReconciliationOutcomeChart } from '../components/visualizations/ReconciliationOutcomeChart';
 import { ExceptionBreakdownChart } from '../components/visualizations/ExceptionBreakdownChart';
+import { formatCurrency, formatNumber, formatPercent } from '../utils/formatters';
 
 interface ReportsViewProps {
   activeBatchId?: string | null;
@@ -166,19 +167,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ activeBatchId }) => {
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between py-1 border-b border-slate-855">
                   <span className="text-slate-400">Total Records:</span>
-                  <span className="font-bold text-white">{reconReport?.total_records}</span>
+                  <span className="font-bold text-white tabular-nums">{formatNumber(reconReport?.total_records ?? 0)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-855">
                   <span className="text-slate-400">Matched Cleanly:</span>
-                  <span className="font-bold text-emerald-400">{reconReport?.matched}</span>
+                  <span className="font-bold text-emerald-400 tabular-nums">{formatNumber(reconReport?.matched ?? 0)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-855">
                   <span className="text-slate-400">Unresolved Exceptions:</span>
-                  <span className="font-bold text-rose-400">{reconReport?.unresolved}</span>
+                  <span className="font-bold text-rose-400 tabular-nums">{formatNumber(reconReport?.unresolved ?? 0)}</span>
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="text-slate-400">Match Rate:</span>
-                  <span className="font-bold text-emerald-400">{reconReport?.match_rate.toFixed(2)}%</span>
+                  <span className="font-bold text-emerald-400 tabular-nums">{formatPercent(reconReport?.match_rate ?? 0)}</span>
                 </div>
               </div>
             </div>
@@ -192,22 +193,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ activeBatchId }) => {
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between py-1 border-b border-slate-855">
                   <span className="text-slate-400">Total Exceptions:</span>
-                  <span className="font-bold text-rose-400">{exceptionReport?.exception_count}</span>
+                  <span className="font-bold text-rose-400 tabular-nums">{formatNumber(exceptionReport?.exception_count ?? 0)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-855">
                   <span className="text-slate-400">Total Discrepancy Amount:</span>
-                  <span className="font-bold text-rose-400">
-                    ₹{(exceptionReport?.total_financial_difference ?? 0).toFixed(2)}
+                  <span className="font-bold text-rose-400 tabular-nums">
+                    {formatCurrency(exceptionReport?.total_financial_difference ?? 0)}
                   </span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-855">
                   <span className="text-slate-400">Resolved Exceptions:</span>
-                  <span className="font-bold text-emerald-400">{exceptionReport?.resolved_count}</span>
+                  <span className="font-bold text-emerald-400 tabular-nums">{formatNumber(exceptionReport?.resolved_count ?? 0)}</span>
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="text-slate-400">Resolution Rate:</span>
-                  <span className="font-bold text-emerald-400">
-                    {(exceptionReport?.resolution_rate ?? 0).toFixed(2)}%
+                  <span className="font-bold text-emerald-400 tabular-nums">
+                    {formatPercent(exceptionReport?.resolution_rate ?? 0)}
                   </span>
                 </div>
               </div>

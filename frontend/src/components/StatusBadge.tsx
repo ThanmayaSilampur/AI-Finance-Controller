@@ -1,9 +1,6 @@
 import React from 'react';
 import {
-  CheckCircle2,
   XCircle,
-  AlertTriangle,
-  Clock,
   ArrowUpRight,
   ShieldCheck,
 } from 'lucide-react';
@@ -16,65 +13,66 @@ interface StatusBadgeProps {
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' }) => {
   const norm = (status || 'UNKNOWN').toUpperCase();
-  const sizeClasses = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs';
+  const padding = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
 
   if (norm === 'MATCHED') {
     return (
-      <span className={`inline-flex items-center gap-1.5 font-medium rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 ${sizeClasses}`}>
-        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-        MATCHED
+      <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 ${padding}`}>
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <span>Matched</span>
       </span>
     );
   }
 
   if (norm === 'EXCEPTION') {
     return (
-      <span className={`inline-flex items-center gap-1.5 font-medium rounded-md bg-rose-950/80 text-rose-300 border border-rose-800/80 ${sizeClasses}`}>
-        <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-        EXCEPTION
+      <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 ${padding}`}>
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+        <span>Exception</span>
       </span>
     );
   }
 
-  if (norm === 'PENDING') {
+  if (norm === 'PENDING' || norm === 'PENDING REVIEW') {
     return (
-      <span className={`inline-flex items-center gap-1.5 font-medium rounded-md bg-amber-950/80 text-amber-300 border border-amber-800/80 ${sizeClasses}`}>
-        <Clock className="w-3.5 h-3.5 text-amber-400" />
-        PENDING REVIEW
+      <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 ${padding}`}>
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+        <span>Pending Review</span>
       </span>
     );
   }
 
   if (norm === 'APPROVED') {
     return (
-      <span className={`inline-flex items-center gap-1.5 font-medium rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-700 ${sizeClasses}`}>
-        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-        APPROVED
+      <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 ${padding}`}>
+        <ShieldCheck className="w-3 h-3 text-emerald-400" />
+        <span>Approved</span>
       </span>
     );
   }
 
   if (norm === 'REJECTED') {
     return (
-      <span className={`inline-flex items-center gap-1.5 font-medium rounded-md bg-red-950/80 text-red-300 border border-red-800 ${sizeClasses}`}>
-        <XCircle className="w-3.5 h-3.5 text-red-400" />
-        REJECTED
+      <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-red-500/10 text-red-400 border border-red-500/30 ${padding}`}>
+        <XCircle className="w-3 h-3 text-red-400" />
+        <span>Rejected</span>
       </span>
     );
   }
 
   if (norm === 'ESCALATED') {
     return (
-      <span className={`inline-flex items-center gap-1.5 font-medium rounded-md bg-purple-950/80 text-purple-300 border border-purple-800 ${sizeClasses}`}>
-        <ArrowUpRight className="w-3.5 h-3.5 text-purple-400" />
-        ESCALATED
+      <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/30 ${padding}`}>
+        <ArrowUpRight className="w-3 h-3 text-purple-400" />
+        <span>Escalated</span>
       </span>
     );
   }
 
   return (
-    <span className={`inline-flex items-center gap-1 font-medium rounded-md bg-slate-800 text-slate-300 border border-slate-700 ${sizeClasses}`}>
-      {norm}
+    <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-slate-500/10 text-slate-400 border border-slate-700/50 ${padding}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+      <span>{norm}</span>
     </span>
   );
 };

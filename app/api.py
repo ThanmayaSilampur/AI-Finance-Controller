@@ -311,6 +311,45 @@ class FinanceService:
 
         return self._serialize_batch(batch)
 
+    def reset_all_data(self) -> None:
+        """Clear all batches, transactions, exceptions, reviews, investigations, and audit logs."""
+        from app.db.models import (
+            AnalysisBatchModel,
+            AuditEventModel,
+            BankRecordModel,
+            ExceptionModel,
+            InvestigationModel,
+            LedgerRecordModel,
+            PaymentRecordModel,
+            RawTransaction,
+            ReviewModel,
+            TransactionModel,
+        )
+
+        db = self.repo.db
+        db.query(InvestigationModel).delete(synchronize_session=False)
+        db.query(ReviewModel).delete(synchronize_session=False)
+        db.query(ExceptionModel).delete(synchronize_session=False)
+        db.query(AuditEventModel).delete(synchronize_session=False)
+        db.query(LedgerRecordModel).delete(synchronize_session=False)
+        db.query(BankRecordModel).delete(synchronize_session=False)
+        db.query(PaymentRecordModel).delete(synchronize_session=False)
+        db.query(TransactionModel).delete(synchronize_session=False)
+        db.query(AnalysisBatchModel).delete(synchronize_session=False)
+        db.query(RawTransaction).delete(synchronize_session=False)
+        db.commit()
+
+        self.active_batch_id = None
+        self.results = []
+        self.payment_records = []
+        self.bank_records = []
+        self.ledger_records = []
+
+        if hasattr(self, "audit_store") and hasattr(self.audit_store, "path") and self.audit_store.path.exists():
+            self.audit_store.path.write_text("[]", encoding="utf-8")
+        if hasattr(self, "investigation_store") and hasattr(self.investigation_store, "path") and self.investigation_store.path.exists():
+            self.investigation_store.path.write_text("[]", encoding="utf-8")
+
     def list_batches(self) -> List[Dict[str, Any]]:
         batches = self.repo.list_analysis_batches()
         return [self._serialize_batch(b) for b in batches]
@@ -1128,6 +1167,12 @@ async def upload_analysis(
         raise HTTPException(status_code=400, detail={"error": "INVALID_FILE_FORMAT", "message": str(exc)}) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": "PROCESSING_ERROR", "message": str(exc)}) from exc
+
+
+@app.delete("/analysis")
+def reset_workspace() -> Dict[str, Any]:
+    service.reset_all_data()
+    return {"status": "SUCCESS", "message": "Workspace successfully reset to clean empty state"}
 
 
 @app.get("/analysis")

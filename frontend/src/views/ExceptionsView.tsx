@@ -24,6 +24,7 @@ import { ReviewActionModal } from '../components/ReviewActionModal';
 import { TransactionDetailDrawer } from '../components/TransactionDetailDrawer';
 import { ThreeWayEvidenceVisualizer } from '../components/visualizations/ThreeWayEvidenceVisualizer';
 import { InvestigationPipeline } from '../components/visualizations/InvestigationPipeline';
+import { formatCurrency } from '../utils/formatters';
 
 interface ExceptionsViewProps {
   activeBatchId?: string | null;
@@ -291,8 +292,8 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
                       {exc.difference !== null && (
                         <div>
                           <span className="text-slate-500">Difference: </span>
-                          <span className="font-mono font-bold text-rose-400">
-                            ₹{exc.difference.toFixed(2)}
+                          <span className="font-mono font-bold text-rose-400 tabular-nums">
+                            {formatCurrency(exc.difference)}
                           </span>
                         </div>
                       )}

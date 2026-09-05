@@ -20,6 +20,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { ReconciliationOutcomeChart } from '../components/visualizations/ReconciliationOutcomeChart';
 import { ExceptionBreakdownChart } from '../components/visualizations/ExceptionBreakdownChart';
+import { formatCurrency, formatNumber, formatPercent } from '../utils/formatters';
 
 interface DashboardViewProps {
   activeBatchId?: string | null;
@@ -157,18 +158,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Total Ingested */}
         <div
           onClick={() => onNavigateToReconciliation('ALL')}
-          className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col justify-between cursor-pointer hover:border-slate-700 transition"
+          className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between cursor-pointer hover:border-blue-500/50 hover:shadow-lg transition group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Ingested Transactions
             </span>
-            <Scale className="w-4 h-4 text-blue-400" />
+            <Scale className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="mt-3">
-            <div className="text-2xl font-bold font-mono text-white">{totalRecords}</div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Synthetic batch 3-way records
+          <div className="mt-4">
+            <div className="text-2xl font-bold font-mono text-white tabular-nums">{formatNumber(totalRecords)}</div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              Reconciled 3-way records
             </p>
           </div>
         </div>
@@ -176,20 +177,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Match Rate */}
         <div
           onClick={() => onNavigateToReconciliation('MATCHED')}
-          className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col justify-between cursor-pointer hover:border-slate-700 transition"
+          className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between cursor-pointer hover:border-emerald-500/50 hover:shadow-lg transition group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Clean Match Rate
             </span>
-            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <TrendingUp className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="mt-3">
-            <div className="text-2xl font-bold font-mono text-emerald-400">
-              {matchRate.toFixed(1)}%
+          <div className="mt-4">
+            <div className="text-2xl font-bold font-mono text-emerald-400 tabular-nums">
+              {formatPercent(matchRate)}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              <span className="text-emerald-300 font-mono font-semibold">{matchedRecords}</span> of {totalRecords} matched exactly
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              <span className="text-emerald-400 font-mono font-semibold">{formatNumber(matchedRecords)}</span> of {formatNumber(totalRecords)} matched exactly
             </p>
           </div>
         </div>
@@ -197,18 +198,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Exceptions & Variance */}
         <div
           onClick={() => onNavigateToExceptions('ALL')}
-          className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col justify-between cursor-pointer hover:border-slate-700 transition"
+          className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between cursor-pointer hover:border-rose-500/50 hover:shadow-lg transition group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Identified Exceptions
             </span>
-            <AlertTriangle className="w-4 h-4 text-rose-400" />
+            <AlertTriangle className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="mt-3">
-            <div className="text-2xl font-bold font-mono text-rose-400">{exceptionCount}</div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Net Discrepancy: <span className="font-mono font-semibold text-rose-300">₹{totalVariance.toFixed(2)}</span>
+          <div className="mt-4">
+            <div className="text-2xl font-bold font-mono text-rose-400 tabular-nums">{formatNumber(exceptionCount)}</div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              Net Discrepancy: <span className="font-mono font-semibold text-rose-400">{formatCurrency(totalVariance)}</span>
             </p>
           </div>
         </div>
@@ -216,18 +217,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Governance Queue */}
         <div
           onClick={() => onNavigateToExceptions('PENDING')}
-          className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col justify-between cursor-pointer hover:border-slate-700 transition"
+          className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between cursor-pointer hover:border-amber-500/50 hover:shadow-lg transition group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Pending Human Review
             </span>
-            <Clock className="w-4 h-4 text-amber-400" />
+            <Clock className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="mt-3">
-            <div className="text-2xl font-bold font-mono text-amber-400">{pendingCount}</div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Resolved / Closed: <span className="font-mono text-emerald-300 font-semibold">{resolvedCount}</span>
+          <div className="mt-4">
+            <div className="text-2xl font-bold font-mono text-amber-400 tabular-nums">{formatNumber(pendingCount)}</div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              Resolved / Closed: <span className="font-mono text-emerald-400 font-semibold">{formatNumber(resolvedCount)}</span>
             </p>
           </div>
         </div>
@@ -303,8 +304,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <td className="px-4 py-3">
                       <SeverityBadge severity={exc.severity} />
                     </td>
-                    <td className="px-4 py-3 font-mono font-semibold text-rose-400">
-                      {exc.difference !== null ? `₹${exc.difference.toFixed(2)}` : 'N/A'}
+                    <td className="px-4 py-3 font-mono font-semibold text-rose-400 tabular-nums">
+                      {exc.difference !== null ? formatCurrency(exc.difference) : 'N/A'}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={exc.review_status} size="sm" />

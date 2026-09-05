@@ -4,25 +4,284 @@
 
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white;
+    @apply bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white transition-colors duration-150;
   }
 }
 
-/* Custom scrollbars for data tables */
+/* ==========================================================================
+   LIGHT THEME SYSTEM OVERRIDES
+   Activates when html.light or .light is applied to the root element.
+   Preserves dark mode pixel-for-pixel when not active.
+   ========================================================================== */
+
+/* 1. Page Background & Main Content */
+html.light,
+html.light body,
+html.light .bg-slate-950,
+.light,
+.light body,
+.light.bg-slate-950,
+.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* 2. Containers, Cards, Header & Footer */
+html.light header,
+html.light footer,
+html.light .bg-slate-900,
+html.light .bg-slate-850,
+.light header,
+.light footer,
+.light .bg-slate-900,
+.light .bg-slate-850,
+html.light [class*="bg-slate-900/"],
+html.light [class*="bg-slate-950/"],
+.light [class*="bg-slate-900/"],
+.light [class*="bg-slate-950/"] {
+  background-color: #ffffff !important;
+}
+
+html.light .bg-slate-900,
+.light .bg-slate-900 {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* 3. Borders & Dividers */
+html.light .border-slate-800,
+html.light .border-slate-800\/80,
+html.light .border-slate-850,
+html.light .border-slate-900,
+html.light .border-slate-700,
+.light .border-slate-800,
+.light .border-slate-800\/80,
+.light .border-slate-850,
+.light .border-slate-900,
+.light .border-slate-700 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+.light .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
+}
+
+/* 4. Sub-panels, Table Headers, Row Hovers */
+html.light .bg-slate-800,
+html.light .hover\:bg-slate-800:hover,
+html.light .hover\:bg-slate-850\/50:hover,
+html.light .hover\:bg-slate-850\/60:hover,
+html.light .hover\:bg-slate-900:hover,
+html.light [class*="hover:bg-slate-800"]:hover,
+.light .bg-slate-800,
+.light .hover\:bg-slate-800:hover,
+.light .hover\:bg-slate-850\/50:hover,
+.light .hover\:bg-slate-850\/60:hover,
+.light .hover\:bg-slate-900:hover,
+.light [class*="hover:bg-slate-800"]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+/* 5. Typography & Text Contrast */
+html.light .text-slate-100 {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-200 {
+  color: #1e293b !important;
+}
+
+html.light .text-slate-300 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.light .text-white {
+  color: #0f172a !important;
+}
+
+/* 6. PROTECT Solid Primary Buttons, Action Links & Status Accents */
+html.light button.bg-blue-600,
+html.light button.bg-blue-600 *,
+html.light button.bg-purple-600,
+html.light button.bg-purple-600 *,
+html.light [class*="bg-blue-600"] *,
+html.light [class*="bg-purple-600"] *,
+html.light [class*="bg-emerald-600"] *,
+html.light [class*="bg-rose-600"] *,
+html.light [class*="bg-red-600"] *,
+html.light a.bg-blue-600,
+html.light a.bg-blue-600 * {
+  color: #ffffff !important;
+}
+
+html.light .bg-blue-600 {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+html.light .bg-blue-600:hover {
+  background-color: #1d4ed8 !important;
+}
+
+/* 7. Header Controls & Navigation Tabs */
+html.light header {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+html.light header .font-bold.text-white {
+  color: #0f172a !important;
+}
+
+html.light nav {
+  border-top-color: #e2e8f0 !important;
+}
+
+html.light nav button:not(.bg-blue-600) {
+  color: #64748b !important;
+}
+
+html.light nav button:not(.bg-blue-600):hover {
+  color: #0f172a !important;
+  background-color: #f1f5f9 !important;
+}
+
+html.light nav button.bg-blue-600 {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* 8. Ask Copilot & Theme Switch Controls */
+html.light button[title*="Copilot"] {
+  background-color: #f3e8ff !important;
+  color: #7e22ce !important;
+  border-color: #d8b4fe !important;
+}
+
+html.light button[title*="Copilot"] * {
+  color: #7e22ce !important;
+}
+
+html.light .bg-slate-950.border.border-slate-800 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 9. Inputs, Textareas & Search Bars */
+html.light input,
+html.light select,
+html.light textarea {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* 10. Data Tables (Reconciliation, Exceptions, Audit) */
+html.light table th {
+  background-color: #f8fafc !important;
+  color: #475569 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light table tr {
+  border-color: #e2e8f0 !important;
+}
+
+html.light table tr:hover td {
+  background-color: #f8fafc !important;
+}
+
+/* 11. Soft Pastel Accents for Status Badges */
+html.light [class*="bg-emerald-950"] {
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+  border-color: #a7f3d0 !important;
+}
+html.light [class*="bg-emerald-950"] * {
+  color: #065f46 !important;
+}
+
+html.light [class*="bg-rose-950"],
+html.light [class*="bg-red-950"] {
+  background-color: #fff1f2 !important;
+  color: #9f1239 !important;
+  border-color: #fecdd3 !important;
+}
+html.light [class*="bg-rose-950"] *,
+html.light [class*="bg-red-950"] * {
+  color: #9f1239 !important;
+}
+
+html.light [class*="bg-amber-950"] {
+  background-color: #fffbeb !important;
+  color: #92400e !important;
+  border-color: #fde68a !important;
+}
+html.light [class*="bg-amber-950"] * {
+  color: #92400e !important;
+}
+
+html.light [class*="bg-blue-950"] {
+  background-color: #eff6ff !important;
+  color: #1e40af !important;
+  border-color: #bfdbfe !important;
+}
+html.light [class*="bg-blue-950"] * {
+  color: #1e40af !important;
+}
+
+/* 12. Modal & Drawer Backdrops */
+html.light .fixed.inset-0.bg-black\/60,
+html.light .fixed.inset-0.bg-black\/80 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+/* 13. Visualizations (Donut chart track) */
+html.light .stroke-slate-800 {
+  stroke: #e2e8f0 !important;
+}
+
+/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
-::-webkit-scrollbar-track {
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+html:not(.light) ::-webkit-scrollbar-track {
   background: #0f172a;
 }
 
-::-webkit-scrollbar-thumb {
+html:not(.light) ::-webkit-scrollbar-thumb {
   background: #334155;
   border-radius: 3px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+html:not(.light) ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }

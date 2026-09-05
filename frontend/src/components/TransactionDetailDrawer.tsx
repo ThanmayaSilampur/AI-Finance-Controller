@@ -14,6 +14,7 @@ import { api } from '../api/client';
 import { SourceRecord, TransactionDetail } from '../api/types';
 import { StatusBadge } from './StatusBadge';
 import { ThreeWayEvidenceVisualizer } from './visualizations/ThreeWayEvidenceVisualizer';
+import { formatCurrency, formatDate } from '../utils/formatters';
 
 interface TransactionDetailDrawerProps {
   transactionId: string | null;
@@ -80,21 +81,23 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
             <div className="space-y-2 text-xs">
               <div>
                 <span className="text-slate-500 text-[11px] block">Raw Amount</span>
-                <span className="font-mono text-sm font-semibold text-white">
-                  {record.currency} {parseFloat(record.amount || '0').toFixed(2)}
+                <span className="font-mono text-sm font-semibold text-white tabular-nums">
+                  {record.currency === 'INR' || !record.currency
+                    ? formatCurrency(record.amount || '0')
+                    : `${record.currency} ${parseFloat(record.amount || '0').toFixed(2)}`}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500 text-[11px] block">Normalized Value</span>
-                <span className="font-mono text-xs text-blue-400 font-semibold">
-                  {normalizedVal ? `₹${parseFloat(normalizedVal).toFixed(2)}` : 'N/A'}
+                <span className="font-mono text-xs text-blue-400 font-semibold tabular-nums">
+                  {normalizedVal ? formatCurrency(normalizedVal) : 'N/A'}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <div>
                   <span className="text-slate-500 text-[10px] block">Date</span>
                   <span className="font-mono text-slate-300 text-[11px]">
-                    {record.transaction_date || 'N/A'}
+                    {record.transaction_date ? formatDate(record.transaction_date) : 'N/A'}
                   </span>
                 </div>
                 <div>

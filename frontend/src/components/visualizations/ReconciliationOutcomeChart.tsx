@@ -82,7 +82,8 @@ export const ReconciliationOutcomeChart: React.FC<ReconciliationOutcomeChartProp
               cy={size / 2}
               r={radius}
               fill="transparent"
-              stroke="#0f172a"
+              stroke="currentColor"
+              className="text-slate-800"
               strokeWidth={strokeWidth}
             />
 

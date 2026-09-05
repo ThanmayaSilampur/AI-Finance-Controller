@@ -98,22 +98,25 @@ def test_copilot_unconfigured_error(tmp_path):
         service.answer_copilot_query("Any question?")
 
 
-def test_copilot_api_endpoint():
-    from app.api import service as global_service, copilot_query, CopilotQueryRequest
-    global_service.agent.provider = MockAIProvider()
+def test_copilot_api_endpoint(monkeypatch, tmp_path):
+    import app.api as api_mod
+    data_dir = tmp_path / "copilot_api_data"
+    test_service = FinanceService(data_dir=data_dir, seed_on_empty=False)
+    test_service.agent.provider = MockAIProvider()
+    monkeypatch.setattr(api_mod, "service", test_service)
 
-    batch = global_service.create_analysis_batch(
+    batch = test_service.create_analysis_batch(
         payment_content=DATASET_PAYMENT,
         bank_content=DATASET_BANK,
         ledger_content=DATASET_LEDGER,
         batch_name="API Copilot Batch",
     )
 
-    req = CopilotQueryRequest(
+    req = api_mod.CopilotQueryRequest(
         query="Tell me about transaction TX002 and variance",
         batch_id=batch["batch_id"],
     )
-    data = copilot_query(req)
+    data = api_mod.copilot_query(req)
 
     assert "answer" in data
     assert data["batch_id"] == batch["batch_id"]

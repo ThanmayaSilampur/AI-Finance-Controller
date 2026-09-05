@@ -71,8 +71,21 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     loadHeaderMetrics();
-    const interval = setInterval(loadHeaderMetrics, 15000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        loadHeaderMetrics();
+      }
+    }, 15000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadHeaderMetrics();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [activeBatchId]);
 
   const handleNavigateToExceptions = (statusFilter?: string) => {

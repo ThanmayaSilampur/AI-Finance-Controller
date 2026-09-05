@@ -6,6 +6,8 @@ import {
   Loader2,
   ExternalLink,
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { TransactionSummary } from '../api/types';
@@ -66,6 +68,14 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
     loadTransactions();
   }, [activeBatchId]);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, exceptionTypeFilter, activeBatchId]);
+
   // Compute available exception types
   const availableExceptionTypes = useMemo(() => {
     const types = new Set<string>();
@@ -94,6 +104,12 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
       return matchesSearch && matchesStatus && matchesExceptionType;
     });
   }, [transactions, searchQuery, statusFilter, exceptionTypeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+  const paginatedTransactions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredTransactions.slice(start, start + pageSize);
+  }, [filteredTransactions, currentPage, pageSize]);
 
   return (
     <div className="space-y-6">
@@ -197,7 +213,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 font-sans">
-                {filteredTransactions.map((tx) => (
+                {paginatedTransactions.map((tx) => (
                   <tr
                     key={tx.transaction_id}
                     className="hover:bg-slate-850/60 transition group cursor-pointer"
@@ -257,6 +273,55 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls */}
+          {filteredTransactions.length > pageSize && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-800 bg-slate-950/60 text-xs font-mono text-slate-400">
+              <div className="flex items-center gap-2">
+                <span>Rows per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span className="text-slate-500 ml-2">
+                  Showing {(currentPage - 1) * pageSize + 1} -{' '}
+                  {Math.min(currentPage * pageSize, filteredTransactions.length)} of{' '}
+                  {filteredTransactions.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <span className="text-slate-300">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    title="Next Page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

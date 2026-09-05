@@ -77,3 +77,34 @@ def test_date_mismatch():
 
     assert result.matched is False
     assert result.exception_type == "date_mismatch"
+
+
+def test_duplicate_reference_collision():
+    payment1 = TransactionRecord("TX3001", "payment", Decimal("1000"), raw={"amount": "1000", "date": "2026-08-20"})
+    payment2 = TransactionRecord("TX3001", "payment", Decimal("1000"), raw={"amount": "1000", "date": "2026-08-20"})
+    bank = TransactionRecord("TX3001", "bank", Decimal("1000"), raw={"amount": "1000", "date": "2026-08-20"})
+    ledger = TransactionRecord("TX3001", "ledger", Decimal("1000"), raw={"amount": "1000", "date": "2026-08-20"})
+
+    result = match_records([payment1, payment2], [bank], [ledger])
+    assert len(result) == 1
+    assert result[0].matched is False
+    assert result[0].exception_type == "duplicate_reference"
+    assert "payment (2 records)" in result[0].details["duplicates"]
+
+
+def test_settlement_clearing_grace_window():
+    payment = TransactionRecord("TX3002", "payment", Decimal("1000"), status="SUCCESS", raw={"amount": "1000", "date": "2026-08-20", "status": "SUCCESS"})
+    bank = TransactionRecord("TX3002", "bank", Decimal("1000"), status="POSTED", raw={"amount": "1000", "date": "2026-08-21", "status": "POSTED"})
+    ledger = TransactionRecord("TX3002", "ledger", Decimal("1000"), status="PAID", raw={"amount": "1000", "date": "2026-08-20", "status": "PAID"})
+
+    # Strict mode (0 grace days) -> date_mismatch
+    res_strict = match_records([payment], [bank], [ledger], max_date_variance_days=0)[0]
+    assert res_strict.matched is False
+    assert res_strict.exception_type == "date_mismatch"
+
+    # Permissive T+1 grace window (1 grace day) -> Clean Match
+    res_permissive = match_records([payment], [bank], [ledger], max_date_variance_days=1)[0]
+    assert res_permissive.matched is True
+    assert res_permissive.exception_type is None
+    assert "Cleared within permissible T+1 settlement window." in res_permissive.details.get("note", "")
+

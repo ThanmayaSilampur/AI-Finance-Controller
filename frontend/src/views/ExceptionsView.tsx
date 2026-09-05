@@ -8,6 +8,8 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   History,
   Scale,
 } from 'lucide-react';
@@ -152,6 +154,20 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
     });
   }, [exceptions, searchQuery, reviewStatusFilter, severityFilter, exceptionTypeFilter]);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, reviewStatusFilter, severityFilter, exceptionTypeFilter, activeBatchId]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredExceptions.length / pageSize));
+  const paginatedExceptions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredExceptions.slice(start, start + pageSize);
+  }, [filteredExceptions, currentPage, pageSize]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -255,7 +271,7 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
             Showing <strong className="text-white">{filteredExceptions.length}</strong> exceptions
           </div>
 
-          {filteredExceptions.map((exc) => {
+          {paginatedExceptions.map((exc) => {
             const isInvestigating = investigatingIds[exc.exception_id];
             const invResult = investigations[exc.exception_id];
             const isExpanded = expandedIds[exc.exception_id];
@@ -448,6 +464,55 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
               </div>
             );
           })}
+
+          {/* Pagination Controls */}
+          {filteredExceptions.length > pageSize && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono text-slate-400">
+              <div className="flex items-center gap-2">
+                <span>Rows per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span className="text-slate-500 ml-2">
+                  Showing {(currentPage - 1) * pageSize + 1} -{' '}
+                  {Math.min(currentPage * pageSize, filteredExceptions.length)} of{' '}
+                  {filteredExceptions.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <span className="text-slate-300">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="p-1 rounded bg-slate-950 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-1 rounded bg-slate-950 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    title="Next Page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

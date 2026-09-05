@@ -355,3 +355,78 @@ def test_api_end_to_end(tmp_path):
 
     finally:
         api.stop()
+
+
+def test_diagnostic_cache_reuses_identical_signatures(tmp_path):
+    """Verify that identical exception signatures reuse cached diagnostic output."""
+    store = InvestigationStore(path=tmp_path / "test_inv.json")
+    provider = MockAIProvider()
+    agent = InvestigationAgent(store=store, provider=provider)
+
+    evidence_1 = {
+        "transaction_id": "TX-CACHE-1",
+        "exception_type": "amount_mismatch",
+        "payment_amount": Decimal("100.00"),
+        "bank_amount": Decimal("90.00"),
+        "difference": Decimal("10.00"),
+        "legs_present": ["payment", "bank"],
+        "missing_legs": ["ledger"],
+    }
+    inv1 = agent.investigate_exception(
+        exception={"exception_id": "EX-C1", "transaction_id": "TX-CACHE-1", "exception_type": "amount_mismatch"},
+        evidence=evidence_1,
+    )
+    assert len(agent._cache) == 1
+
+    evidence_2 = {
+        "transaction_id": "TX-CACHE-2",
+        "exception_type": "amount_mismatch",
+        "payment_amount": Decimal("100.00"),
+        "bank_amount": Decimal("90.00"),
+        "difference": Decimal("10.00"),
+        "legs_present": ["payment", "bank"],
+        "missing_legs": ["ledger"],
+    }
+    inv2 = agent.investigate_exception(
+        exception={"exception_id": "EX-C2", "transaction_id": "TX-CACHE-2", "exception_type": "amount_mismatch"},
+        evidence=evidence_2,
+    )
+    assert inv2["exception_id"] == "EX-C2"
+    assert inv2["diagnosis"] == inv1["diagnosis"]
+    assert inv2["confidence"] == inv1["confidence"]
+    assert len(agent._cache) == 1  # Reused identical signature cache
+
+
+def test_historical_precedents_retrieval(db_session):
+    """Verify historical auditor decisions can be extracted as RAG precedents."""
+    from app.ai_agent import get_historical_precedents
+    from app.db.models import ExceptionModel, ReviewModel
+
+    exc = ExceptionModel(
+        exception_id="EX-PREC-1",
+        audit_id="AUD-PREC-1",
+        transaction_id="TX-PREC-1",
+        exception_type="amount_mismatch",
+        difference=Decimal("5.00"),
+        recommended_action="MANUAL_REVIEW",
+        review_status="APPROVED",
+    )
+    db_session.add(exc)
+    db_session.commit()
+
+    rev = ReviewModel(
+        exception_id="EX-PREC-1",
+        previous_state="PENDING",
+        new_state="APPROVED",
+        reviewer="lead_auditor",
+        comment="MDR reconciliation within contractual 5 rupee boundary",
+    )
+    db_session.add(rev)
+    db_session.commit()
+
+    precedents = get_historical_precedents(db_session, "amount_mismatch", limit=3)
+    assert len(precedents) == 1
+    assert precedents[0]["decision"] == "APPROVED"
+    assert precedents[0]["reviewer"] == "lead_auditor"
+    assert "contractual 5 rupee boundary" in precedents[0]["comment"]
+

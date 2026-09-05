@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.ai_agent import (
     AIConfigurationError,
@@ -41,7 +41,7 @@ from app.db.models import (
     TransactionModel,
 )
 from app.db.repository import DatabaseRepository
-from app.db.session import SessionFactory, create_db_engine
+from app.db.session import SessionFactory, create_db_engine, get_db
 from app.db.migration import run_migrations
 from app.ingestion import parse_csv_records
 from app.matching import match_records
@@ -106,7 +106,16 @@ class FinanceService:
             self.active_batch_id = batches[0].batch_id
             self._reload_batch(self.active_batch_id)
 
-    def _reload_batch(self, batch_id: Optional[str]) -> None:
+    def _resolve_session(self, db: Any = None) -> Session:
+        return db if isinstance(db, Session) else self.db
+
+    def _repo(self, db: Any = None) -> DatabaseRepository:
+        session = self._resolve_session(db)
+        if session is self.db:
+            return self.repo
+        return DatabaseRepository(session)
+
+    def _reload_batch(self, batch_id: Optional[str], db: Any = None) -> None:
         if not batch_id:
             self.results = []
             self.payment_records = []
@@ -114,9 +123,10 @@ class FinanceService:
             self.ledger_records = []
             return
 
-        query_p = self.db.query(PaymentRecordModel).filter(PaymentRecordModel.batch_id == batch_id)
-        query_b = self.db.query(BankRecordModel).filter(BankRecordModel.batch_id == batch_id)
-        query_l = self.db.query(LedgerRecordModel).filter(LedgerRecordModel.batch_id == batch_id)
+        session = self._resolve_session(db)
+        query_p = session.query(PaymentRecordModel).filter(PaymentRecordModel.batch_id == batch_id)
+        query_b = session.query(BankRecordModel).filter(BankRecordModel.batch_id == batch_id)
+        query_l = session.query(LedgerRecordModel).filter(LedgerRecordModel.batch_id == batch_id)
 
         payments = [
             TransactionRecord(
@@ -220,6 +230,7 @@ class FinanceService:
         bank_filename: str = "bank.csv",
         ledger_filename: str = "ledger.csv",
         batch_name: Optional[str] = None,
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
         start_time = time.perf_counter()
         batch_id = f"BATCH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
@@ -243,7 +254,10 @@ class FinanceService:
             if r.exception_type:
                 exception_breakdown[r.exception_type] = exception_breakdown.get(r.exception_type, 0) + 1
 
-        batch = self.repo.save_analysis_batch(
+        repo = self._repo(db)
+        audit_store = AuditStore(path=self.data_dir / "audit_records.json", db=self._resolve_session(db))
+
+        batch = repo.save_analysis_batch(
             batch_id=batch_id,
             batch_name=batch_name or f"Analysis Run {batch_id}",
             status="COMPLETED",
@@ -265,18 +279,18 @@ class FinanceService:
         )
 
         for p in payment_records:
-            self.repo.save_payment_record(p, batch_id=batch_id)
-            self.repo.save_normalized_transaction(p, batch_id=batch_id)
+            repo.save_payment_record(p, batch_id=batch_id)
+            repo.save_normalized_transaction(p, batch_id=batch_id)
         for b in bank_records:
-            self.repo.save_bank_record(b, batch_id=batch_id)
+            repo.save_bank_record(b, batch_id=batch_id)
         for l in ledger_records:
-            self.repo.save_ledger_record(l, batch_id=batch_id)
+            repo.save_ledger_record(l, batch_id=batch_id)
 
         for result in results:
             if not result.exception_type:
                 continue
             rec = self._build_exception_record_for_records(result, payment_records, bank_records, ledger_records)
-            audit_entry = self.audit_store.create_record(
+            audit_entry = audit_store.create_record(
                 transaction_id=rec["transaction_id"],
                 match_status="EXCEPTION",
                 exception_type=rec["exception_type"],
@@ -288,7 +302,7 @@ class FinanceService:
                 batch_id=batch_id,
             )
             exc_id = f"EX-{audit_entry['audit_id'].split('-')[-1]}"
-            self.repo.save_exception(
+            repo.save_exception(
                 exception_id=exc_id,
                 audit_id=audit_entry["audit_id"],
                 transaction_id=rec["transaction_id"],
@@ -311,7 +325,7 @@ class FinanceService:
 
         return self._serialize_batch(batch)
 
-    def reset_all_data(self) -> None:
+    def reset_all_data(self, db: Optional[Session] = None) -> None:
         """Clear all batches, transactions, exceptions, reviews, investigations, and audit logs."""
         from app.db.models import (
             AnalysisBatchModel,
@@ -326,18 +340,18 @@ class FinanceService:
             TransactionModel,
         )
 
-        db = self.repo.db
-        db.query(InvestigationModel).delete(synchronize_session=False)
-        db.query(ReviewModel).delete(synchronize_session=False)
-        db.query(ExceptionModel).delete(synchronize_session=False)
-        db.query(AuditEventModel).delete(synchronize_session=False)
-        db.query(LedgerRecordModel).delete(synchronize_session=False)
-        db.query(BankRecordModel).delete(synchronize_session=False)
-        db.query(PaymentRecordModel).delete(synchronize_session=False)
-        db.query(TransactionModel).delete(synchronize_session=False)
-        db.query(AnalysisBatchModel).delete(synchronize_session=False)
-        db.query(RawTransaction).delete(synchronize_session=False)
-        db.commit()
+        target_db = self._resolve_session(db)
+        target_db.query(InvestigationModel).delete(synchronize_session=False)
+        target_db.query(ReviewModel).delete(synchronize_session=False)
+        target_db.query(ExceptionModel).delete(synchronize_session=False)
+        target_db.query(AuditEventModel).delete(synchronize_session=False)
+        target_db.query(LedgerRecordModel).delete(synchronize_session=False)
+        target_db.query(BankRecordModel).delete(synchronize_session=False)
+        target_db.query(PaymentRecordModel).delete(synchronize_session=False)
+        target_db.query(TransactionModel).delete(synchronize_session=False)
+        target_db.query(AnalysisBatchModel).delete(synchronize_session=False)
+        target_db.query(RawTransaction).delete(synchronize_session=False)
+        target_db.commit()
 
         self.active_batch_id = None
         self.results = []
@@ -350,12 +364,12 @@ class FinanceService:
         if hasattr(self, "investigation_store") and hasattr(self.investigation_store, "path") and self.investigation_store.path.exists():
             self.investigation_store.path.write_text("[]", encoding="utf-8")
 
-    def list_batches(self) -> List[Dict[str, Any]]:
-        batches = self.repo.list_analysis_batches()
+    def list_batches(self, db: Optional[Session] = None) -> List[Dict[str, Any]]:
+        batches = self._repo(db).list_analysis_batches()
         return [self._serialize_batch(b) for b in batches]
 
-    def get_batch(self, batch_id: str) -> Dict[str, Any]:
-        batch = self.repo.get_analysis_batch(batch_id)
+    def get_batch(self, batch_id: str, db: Optional[Session] = None) -> Dict[str, Any]:
+        batch = self._repo(db).get_analysis_batch(batch_id)
         if not batch:
             raise KeyError(f"Batch {batch_id} not found.")
         return self._serialize_batch(batch)
@@ -379,12 +393,13 @@ class FinanceService:
             "summary_metadata": batch.summary_metadata or {},
         }
 
-    def _results_for_batch(self, batch_id: Optional[str] = None) -> List[ReconciliationResult]:
-        if batch_id is None or (self.active_batch_id and batch_id == self.active_batch_id):
+    def _results_for_batch(self, batch_id: Optional[str] = None, db: Optional[Session] = None) -> List[ReconciliationResult]:
+        if batch_id is None or (self.active_batch_id and batch_id == self.active_batch_id and self.results):
             return self.results
-        query_p = self.db.query(PaymentRecordModel).filter(PaymentRecordModel.batch_id == batch_id).all()
-        query_b = self.db.query(BankRecordModel).filter(BankRecordModel.batch_id == batch_id).all()
-        query_l = self.db.query(LedgerRecordModel).filter(LedgerRecordModel.batch_id == batch_id).all()
+        session = self._resolve_session(db)
+        query_p = session.query(PaymentRecordModel).filter(PaymentRecordModel.batch_id == batch_id).all()
+        query_b = session.query(BankRecordModel).filter(BankRecordModel.batch_id == batch_id).all()
+        query_l = session.query(LedgerRecordModel).filter(LedgerRecordModel.batch_id == batch_id).all()
         p_recs = [
             TransactionRecord(
                 transaction_id=p.transaction_id,
@@ -480,11 +495,61 @@ class FinanceService:
             "recommended_action": result.recommended_action,
         }
 
-    def _transaction_payload(self, transaction_id: str) -> Dict[str, Any]:
+    def _transaction_payload(self, transaction_id: str, db: Optional[Session] = None) -> Dict[str, Any]:
         payment = next((record for record in self.payment_records if record.transaction_id == transaction_id), None)
         bank = next((record for record in self.bank_records if record.transaction_id == transaction_id), None)
         ledger = next((record for record in self.ledger_records if record.transaction_id == transaction_id), None)
         matching = next((result for result in self.results if result.transaction_id == transaction_id), None)
+
+        if payment is None and bank is None and ledger is None:
+            session = self._resolve_session(db)
+            p_model = session.query(PaymentRecordModel).filter(PaymentRecordModel.transaction_id == transaction_id).first()
+            b_model = session.query(BankRecordModel).filter(BankRecordModel.transaction_id == transaction_id).first()
+            l_model = session.query(LedgerRecordModel).filter(LedgerRecordModel.transaction_id == transaction_id).first()
+            if p_model:
+                payment = TransactionRecord(
+                    transaction_id=p_model.transaction_id,
+                    source_system="payment",
+                    amount=p_model.amount,
+                    currency=p_model.currency,
+                    transaction_date=p_model.transaction_date,
+                    status=p_model.status,
+                    reference_id=p_model.reference_id,
+                    customer_id=p_model.customer_id,
+                    order_id=p_model.order_id,
+                    raw=p_model.raw_payload or {},
+                )
+            if b_model:
+                bank = TransactionRecord(
+                    transaction_id=b_model.transaction_id,
+                    source_system="bank",
+                    amount=b_model.amount,
+                    currency=b_model.currency,
+                    transaction_date=b_model.transaction_date,
+                    status=b_model.status,
+                    reference_id=b_model.reference_id,
+                    raw=b_model.raw_payload or {},
+                )
+            if l_model:
+                ledger = TransactionRecord(
+                    transaction_id=l_model.transaction_id,
+                    source_system="ledger",
+                    amount=l_model.amount,
+                    currency=l_model.currency,
+                    transaction_date=l_model.transaction_date,
+                    status=l_model.status,
+                    reference_id=l_model.reference_id,
+                    raw=l_model.raw_payload or {},
+                )
+            if payment or bank or ledger:
+                matches = match_records(
+                    [payment] if payment else [],
+                    [bank] if bank else [],
+                    [ledger] if ledger else [],
+                )
+                if matches:
+                    matching = matches[0]
+
         return {
             "transaction_id": transaction_id,
             "source_records": {
@@ -524,7 +589,7 @@ class FinanceService:
             "details": result.details,
         }
 
-    def _serialize_exception(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def _serialize_exception(self, record: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
         exception_id = record.get("exception_id") or f"EX-{record['audit_id'].split('-')[-1]}"
         transaction_id = record.get("transaction_id")
         return {
@@ -538,12 +603,13 @@ class FinanceService:
             "review_status": record.get("review_status", ReviewState.PENDING.value),
             "reason": record.get("exception_type"),
             "review_history": record.get("review_history", []),
-            "transaction": self._transaction_payload(transaction_id) if transaction_id else None,
+            "transaction": self._transaction_payload(transaction_id, db=db) if transaction_id else None,
         }
 
-    def _find_exception_record(self, exception_id: str) -> Optional[Dict[str, Any]]:
+    def _find_exception_record(self, exception_id: str, db: Optional[Session] = None) -> Optional[Dict[str, Any]]:
         target_num = exception_id.replace("EX-", "").replace("AUD-", "").lstrip("0")
-        for record in self.audit_store._read():
+        store = AuditStore(path=self.data_dir / "audit_records.json", db=self._resolve_session(db))
+        for record in store._read():
             rec_exc_id = record.get("exception_id") or ""
             rec_aud_id = record.get("audit_id") or ""
             if rec_exc_id == exception_id or rec_aud_id == exception_id:
@@ -566,8 +632,9 @@ class FinanceService:
         exception_type: Optional[str] = None,
         transaction_id: Optional[str] = None,
         batch_id: Optional[str] = None,
+        db: Optional[Session] = None,
     ) -> List[Dict[str, Any]]:
-        results = self._results_for_batch(batch_id)
+        results = self._results_for_batch(batch_id, db=db)
         items = []
         for result in results:
             if transaction_id and result.transaction_id != transaction_id:
@@ -590,8 +657,8 @@ class FinanceService:
             )
         return items
 
-    def get_transaction(self, transaction_id: str) -> Dict[str, Any]:
-        payload = self._transaction_payload(transaction_id)
+    def get_transaction(self, transaction_id: str, db: Optional[Session] = None) -> Dict[str, Any]:
+        payload = self._transaction_payload(transaction_id, db=db)
         if not payload["source_records"] and payload["reconciliation_result"] is None:
             raise KeyError("Transaction not found.")
         return payload
@@ -602,38 +669,40 @@ class FinanceService:
         review_status: Optional[str] = None,
         severity: Optional[str] = None,
         batch_id: Optional[str] = None,
+        db: Optional[Session] = None,
     ) -> List[Dict[str, Any]]:
         items = []
         target_batch = batch_id or self.active_batch_id
         if not target_batch:
             return []
-        for record in self.audit_store._read():
+        store = AuditStore(path=self.data_dir / "audit_records.json", db=self._resolve_session(db))
+        for record in store._read():
             if record.get("batch_id") != target_batch:
                 continue
             if record.get("exception_id") is None:
                 record["exception_id"] = f"EX-{record['audit_id'].split('-')[-1]}"
-                self.audit_store.update_record(record["audit_id"], record)
+                store.update_record(record["audit_id"], record)
             if exception_type and record.get("exception_type") != exception_type:
                 continue
             if review_status and record.get("review_status") != review_status.upper():
                 continue
             if severity and self._severity_from_exception(record.get("exception_type")) != severity.upper():
                 continue
-            items.append(self._serialize_exception(record))
+            items.append(self._serialize_exception(record, db=db))
         return items
 
-    def get_exception(self, exception_id: str) -> Dict[str, Any]:
-        record = self._find_exception_record(exception_id)
+    def get_exception(self, exception_id: str, db: Optional[Session] = None) -> Dict[str, Any]:
+        record = self._find_exception_record(exception_id, db=db)
         if record is None:
             raise KeyError("Exception not found.")
-        return self._serialize_exception(record)
+        return self._serialize_exception(record, db=db)
 
-    def investigate_exception(self, exception_id: str) -> Dict[str, Any]:
-        record = self._find_exception_record(exception_id)
+    def investigate_exception(self, exception_id: str, db: Optional[Session] = None) -> Dict[str, Any]:
+        record = self._find_exception_record(exception_id, db=db)
         if record is None:
             raise KeyError("Exception not found.")
         tx_id = record["transaction_id"]
-        payload = self._transaction_payload(tx_id)
+        payload = self._transaction_payload(tx_id, db=db)
 
         source_records = payload.get("source_records") or {}
         p_rec = source_records.get("payment")
@@ -688,6 +757,7 @@ class FinanceService:
             },
             evidence=evidence_collected,
             source=provider_name,
+            db=self._resolve_session(db),
         )
 
         # Serialized evidence for JSON responses (amounts as floats or string representation for API)
@@ -721,15 +791,24 @@ class FinanceService:
             "recommendation": investigation.get("recommendation", "Manual investigation required."),
         }
 
-    def review_exception(self, exception_id: str, decision: str, reviewer: str, comment: str) -> Dict[str, Any]:
-        record = self._find_exception_record(exception_id)
+    def review_exception(
+        self,
+        exception_id: str,
+        decision: str,
+        reviewer: str,
+        comment: str,
+        db: Optional[Session] = None,
+    ) -> Dict[str, Any]:
+        record = self._find_exception_record(exception_id, db=db)
         if record is None:
             raise KeyError("Exception not found.")
         target = record["audit_id"]
-        updated = transition_review_state(self.audit_store, target, ReviewState(decision), reviewer, comment)
+        store = AuditStore(path=self.data_dir / "audit_records.json", db=self._resolve_session(db))
+        updated = transition_review_state(store, target, ReviewState(decision), reviewer, comment)
 
         # Persist review in database
-        self.repo.add_review(
+        repo = self._repo(db)
+        repo.add_review(
             exception_id=record.get("exception_id") or target,
             previous_state=record.get("review_status", "PENDING"),
             new_state=decision,
@@ -746,21 +825,23 @@ class FinanceService:
             "comment": updated.get("reviewer_comment"),
         }
 
-    def get_review_history(self, exception_id: str) -> List[Dict[str, Any]]:
-        record = self._find_exception_record(exception_id)
+    def get_review_history(self, exception_id: str, db: Optional[Session] = None) -> List[Dict[str, Any]]:
+        record = self._find_exception_record(exception_id, db=db)
         if record is None:
             raise KeyError("Exception not found.")
         return record.get("review_history", [])
 
-    def get_audit_history(self, transaction_id: str, batch_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_audit_history(self, transaction_id: str, batch_id: Optional[str] = None, db: Optional[Session] = None) -> Dict[str, Any]:
         target_batch = batch_id or self.active_batch_id
+        store = AuditStore(path=self.data_dir / "audit_records.json", db=self._resolve_session(db))
+        inv_store = InvestigationStore(path=self.data_dir / "investigations.json", db=self._resolve_session(db))
         if target_batch:
             txn_records = [
-                record for record in self.audit_store._read()
+                record for record in store._read()
                 if record.get("transaction_id") == transaction_id and record.get("batch_id") == target_batch
             ]
         else:
-            txn_records = [record for record in self.audit_store._read() if record.get("transaction_id") == transaction_id]
+            txn_records = [record for record in store._read() if record.get("transaction_id") == transaction_id]
 
         investigations = [
             {
@@ -769,7 +850,7 @@ class FinanceService:
                 "status": item.get("agent_status"),
                 "summary": item.get("summary"),
             }
-            for item in self.investigation_store._read()
+            for item in inv_store._read()
             if item.get("exception_id")
             and any(
                 r.get("transaction_id") == transaction_id
@@ -780,21 +861,21 @@ class FinanceService:
         return {
             "transaction_id": transaction_id,
             "audit_records": txn_records,
-            "exception_information": [self._serialize_exception(record) for record in txn_records],
+            "exception_information": [self._serialize_exception(record, db=db) for record in txn_records],
             "investigations": investigations,
             "review_actions": [entry for record in txn_records for entry in record.get("review_history", [])],
         }
 
-    def get_reconciliation_report(self, batch_id: Optional[str] = None) -> Dict[str, Any]:
-        results = self._results_for_batch(batch_id)
+    def get_reconciliation_report(self, batch_id: Optional[str] = None, db: Optional[Session] = None) -> Dict[str, Any]:
+        results = self._results_for_batch(batch_id, db=db)
         return build_summary(results)
 
-    def get_exception_report(self, batch_id: Optional[str] = None) -> Dict[str, Any]:
-        results = self._results_for_batch(batch_id)
+    def get_exception_report(self, batch_id: Optional[str] = None, db: Optional[Session] = None) -> Dict[str, Any]:
+        results = self._results_for_batch(batch_id, db=db)
         return build_exception_report(results)
 
-    def export_exceptions(self, fmt: str = "json", batch_id: Optional[str] = None) -> Tuple[bytes, str]:
-        results = self._results_for_batch(batch_id)
+    def export_exceptions(self, fmt: str = "json", batch_id: Optional[str] = None, db: Optional[Session] = None) -> Tuple[bytes, str]:
+        results = self._results_for_batch(batch_id, db=db)
         output_path = self.data_dir / f"exceptions_export.{fmt.lower()}"
         export_exception_report_helper(results, output_path, fmt=fmt.lower())
         content = output_path.read_bytes()
@@ -806,21 +887,22 @@ class FinanceService:
         query: str,
         batch_id: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
         target_batch_id = batch_id or self.active_batch_id
         if not target_batch_id:
-            batches = self.list_batches()
+            batches = self.list_batches(db=db)
             if batches:
                 target_batch_id = batches[0]["batch_id"]
 
-        recon_report = self.get_reconciliation_report(batch_id=target_batch_id) if target_batch_id else {}
-        exc_report = self.get_exception_report(batch_id=target_batch_id) if target_batch_id else {}
-        exceptions = self.list_exceptions(batch_id=target_batch_id) if target_batch_id else []
+        recon_report = self.get_reconciliation_report(batch_id=target_batch_id, db=db) if target_batch_id else {}
+        exc_report = self.get_exception_report(batch_id=target_batch_id, db=db) if target_batch_id else {}
+        exceptions = self.list_exceptions(batch_id=target_batch_id, db=db) if target_batch_id else []
 
         batch_metadata = {}
         if target_batch_id:
             try:
-                batch_metadata = self.get_batch(target_batch_id)
+                batch_metadata = self.get_batch(target_batch_id, db=db)
             except Exception:
                 pass
 
@@ -841,7 +923,7 @@ class FinanceService:
 
         for tx_id in target_tx_set:
             try:
-                tx_payload = self.get_transaction(tx_id)
+                tx_payload = self.get_transaction(tx_id, db=db)
                 relevant_txns.append(tx_payload)
             except Exception:
                 pass
@@ -1124,12 +1206,13 @@ class CopilotQueryRequest(BaseModel):
 
 
 @app.post("/ai/query")
-def copilot_query(req: CopilotQueryRequest) -> Dict[str, Any]:
+def copilot_query(req: CopilotQueryRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
         return service.answer_copilot_query(
             query=req.query,
             batch_id=req.batch_id,
             history=req.history,
+            db=db,
         )
     except AIConfigurationError as exc:
         raise HTTPException(
@@ -1149,6 +1232,7 @@ async def upload_analysis(
     bank_file: UploadFile = File(...),
     ledger_file: UploadFile = File(...),
     batch_name: Optional[str] = None,
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     try:
         p_bytes = await payment_file.read()
@@ -1162,6 +1246,7 @@ async def upload_analysis(
             bank_filename=bank_file.filename or "bank.csv",
             ledger_filename=ledger_file.filename or "ledger.csv",
             batch_name=batch_name,
+            db=db,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": "INVALID_FILE_FORMAT", "message": str(exc)}) from exc
@@ -1170,39 +1255,39 @@ async def upload_analysis(
 
 
 @app.delete("/analysis")
-def reset_workspace() -> Dict[str, Any]:
-    service.reset_all_data()
+def reset_workspace(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    service.reset_all_data(db=db)
     return {"status": "SUCCESS", "message": "Workspace successfully reset to clean empty state"}
 
 
 @app.get("/analysis")
-def list_batches() -> List[Dict[str, Any]]:
-    return service.list_batches()
+def list_batches(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    return service.list_batches(db=db)
 
 
 @app.get("/analysis/{batch_id}")
-def get_batch(batch_id: str) -> Dict[str, Any]:
+def get_batch(batch_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
-        return service.get_batch(batch_id)
+        return service.get_batch(batch_id, db=db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "BATCH_NOT_FOUND", "message": f"Batch {batch_id} not found."}) from exc
 
 
 @app.get("/analysis/{batch_id}/transactions")
-def get_batch_transactions(batch_id: str) -> List[Dict[str, Any]]:
-    return service.list_transactions(batch_id=batch_id)
+def get_batch_transactions(batch_id: str, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    return service.list_transactions(batch_id=batch_id, db=db)
 
 
 @app.get("/analysis/{batch_id}/exceptions")
-def get_batch_exceptions(batch_id: str) -> List[Dict[str, Any]]:
-    return service.list_exceptions(batch_id=batch_id)
+def get_batch_exceptions(batch_id: str, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    return service.list_exceptions(batch_id=batch_id, db=db)
 
 
 @app.get("/analysis/{batch_id}/reports")
-def get_batch_reports(batch_id: str) -> Dict[str, Any]:
+def get_batch_reports(batch_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     return {
-        "reconciliation": service.get_reconciliation_report(batch_id=batch_id),
-        "exceptions": service.get_exception_report(batch_id=batch_id),
+        "reconciliation": service.get_reconciliation_report(batch_id=batch_id, db=db),
+        "exceptions": service.get_exception_report(batch_id=batch_id, db=db),
     }
 
 
@@ -1212,19 +1297,21 @@ def list_transactions(
     exception_type: Optional[str] = None,
     transaction_id: Optional[str] = None,
     batch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
     return service.list_transactions(
         status=status,
         exception_type=exception_type,
         transaction_id=transaction_id,
         batch_id=batch_id,
+        db=db,
     )
 
 
 @app.get("/transactions/{transaction_id}")
-def get_transaction(transaction_id: str) -> Dict[str, Any]:
+def get_transaction(transaction_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
-        return service.get_transaction(transaction_id)
+        return service.get_transaction(transaction_id, db=db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "TRANSACTION_NOT_FOUND", "message": "Transaction not found."}) from exc
 
@@ -1235,27 +1322,29 @@ def list_exceptions(
     review_status: Optional[str] = None,
     severity: Optional[str] = None,
     batch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
     return service.list_exceptions(
         exception_type=exception_type,
         review_status=review_status,
         severity=severity,
         batch_id=batch_id,
+        db=db,
     )
 
 
 @app.get("/exceptions/{exception_id}")
-def get_exception(exception_id: str) -> Dict[str, Any]:
+def get_exception(exception_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
-        return service.get_exception(exception_id)
+        return service.get_exception(exception_id, db=db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
 
 
 @app.post("/exceptions/{exception_id}/investigate")
-def investigate_exception(exception_id: str) -> Dict[str, Any]:
+def investigate_exception(exception_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
-        return service.investigate_exception(exception_id)
+        return service.investigate_exception(exception_id, db=db)
     except AIConfigurationError as exc:
         raise HTTPException(status_code=422, detail={"error": "AI_UNCONFIGURED", "message": str(exc)}) from exc
     except AIProviderError as exc:
@@ -1265,22 +1354,22 @@ def investigate_exception(exception_id: str) -> Dict[str, Any]:
 
 
 @app.get("/exceptions/{exception_id}/reviews")
-def get_review_history(exception_id: str) -> List[Dict[str, Any]]:
+def get_review_history(exception_id: str, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     try:
-        return service.get_review_history(exception_id)
+        return service.get_review_history(exception_id, db=db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
 
 
 @app.post("/exceptions/{exception_id}/review")
-def review_exception(exception_id: str, payload: ReviewRequest) -> Dict[str, Any]:
+def review_exception(exception_id: str, payload: ReviewRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     decision = payload.decision.upper()
     if decision not in {"APPROVED", "REJECTED", "ESCALATED"}:
         raise HTTPException(status_code=400, detail={"error": "INVALID_REVIEW_DECISION", "message": "Decision must be APPROVED, REJECTED, or ESCALATED."})
     if not payload.reviewer.strip():
         raise HTTPException(status_code=422, detail={"error": "VALIDATION_ERROR", "message": "Reviewer must not be empty."})
     try:
-        return service.review_exception(exception_id, decision, payload.reviewer, payload.comment)
+        return service.review_exception(exception_id, decision, payload.reviewer, payload.comment, db=db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "EXCEPTION_NOT_FOUND", "message": f"Exception {exception_id} was not found."}) from exc
     except ValueError as exc:
@@ -1288,26 +1377,26 @@ def review_exception(exception_id: str, payload: ReviewRequest) -> Dict[str, Any
 
 
 @app.get("/audit/{transaction_id}")
-def get_audit_history(transaction_id: str, batch_id: Optional[str] = Query(None)) -> Dict[str, Any]:
-    return service.get_audit_history(transaction_id, batch_id=batch_id)
+def get_audit_history(transaction_id: str, batch_id: Optional[str] = Query(None), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    return service.get_audit_history(transaction_id, batch_id=batch_id, db=db)
 
 
 @app.get("/reports/reconciliation")
-def get_reconciliation_report(batch_id: Optional[str] = Query(None)) -> Dict[str, Any]:
-    return service.get_reconciliation_report(batch_id=batch_id)
+def get_reconciliation_report(batch_id: Optional[str] = Query(None), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    return service.get_reconciliation_report(batch_id=batch_id, db=db)
 
 
 @app.get("/reports/exceptions")
-def get_exception_report(batch_id: Optional[str] = Query(None)) -> Dict[str, Any]:
-    return service.get_exception_report(batch_id=batch_id)
+def get_exception_report(batch_id: Optional[str] = Query(None), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    return service.get_exception_report(batch_id=batch_id, db=db)
 
 
 @app.get("/reports/exceptions/export")
-def export_exception_report_endpoint(format: str = "json", batch_id: Optional[str] = Query(None)) -> Any:
+def export_exception_report_endpoint(format: str = "json", batch_id: Optional[str] = Query(None), db: Session = Depends(get_db)) -> Any:
     fmt = format.lower()
     if fmt not in {"json", "csv"}:
         raise HTTPException(status_code=422, detail={"error": "INVALID_FORMAT", "message": "Format must be json or csv."})
-    data, media = service.export_exceptions(fmt, batch_id=batch_id)
+    data, media = service.export_exceptions(fmt, batch_id=batch_id, db=db)
     if fmt == "json":
         return json.loads(data.decode("utf-8"))
     return data.decode("utf-8")

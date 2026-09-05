@@ -29,7 +29,12 @@ class AIProviderError(RuntimeError):
 class AIProvider:
     """Abstract LLM provider interface."""
 
-    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    def investigate(
+        self,
+        exception: Dict[str, Any],
+        evidence: Dict[str, Any],
+        precedents: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
     def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
@@ -53,7 +58,12 @@ class MockAIProvider(AIProvider):
             f"All financial metrics and exception statuses are authoritative."
         )
 
-    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    def investigate(
+        self,
+        exception: Dict[str, Any],
+        evidence: Dict[str, Any],
+        precedents: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         exception_id = str(exception.get("exception_id") or exception.get("audit_id") or "EX-UNKNOWN")
         exception_type = str(exception.get("exception_type") or evidence.get("exception_type") or "unresolved").lower()
         transaction_id = str(exception.get("transaction_id") or evidence.get("transaction_id") or "TXN-UNKNOWN")
@@ -398,27 +408,84 @@ class MockAIProvider(AIProvider):
         }
 
 
-def _build_llm_prompt(exception: Dict[str, Any], evidence: Dict[str, Any]) -> str:
+def get_historical_precedents(
+    db: Optional[Session],
+    exception_type: str,
+    limit: int = 3,
+) -> List[Dict[str, Any]]:
+    """Retrieve up to limit historical human auditor decisions for similar exception types."""
+    if db is None or not isinstance(db, Session):
+        return []
+    try:
+        from app.db.models import ExceptionModel, ReviewModel
+        from sqlalchemy import select
+
+        stmt = (
+            select(
+                ReviewModel.new_state,
+                ReviewModel.reviewer,
+                ReviewModel.comment,
+                ExceptionModel.difference,
+            )
+            .join(ExceptionModel, ReviewModel.exception_id == ExceptionModel.exception_id)
+            .where(ExceptionModel.exception_type == exception_type)
+            .order_by(ReviewModel.created_at.desc())
+            .limit(limit)
+        )
+        rows = db.execute(stmt).all()
+        precedents = []
+        for row in rows:
+            precedents.append({
+                "decision": row[0],
+                "reviewer": row[1],
+                "comment": row[2] or "No specific comment",
+                "variance": f"₹{row[3]:.2f}" if row[3] is not None else "N/A",
+            })
+        return precedents
+    except Exception:
+        return []
+
+
+def _build_llm_prompt(
+    exception: Dict[str, Any],
+    evidence: Dict[str, Any],
+    precedents: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     """Construct an objective, strictly evidence-based prompt containing zero ground truth."""
     tx_id = evidence.get("transaction_id") or exception.get("transaction_id") or "UNKNOWN"
     exc_type = evidence.get("exception_type") or exception.get("exception_type") or "unknown"
-    
+
     p_amt = evidence.get("payment_amount")
     b_amt = evidence.get("bank_amount")
     l_amt = evidence.get("ledger_amount")
     diff = evidence.get("difference")
-    
+
     p_date = evidence.get("payment_date")
     b_date = evidence.get("bank_date")
     l_date = evidence.get("ledger_date")
-    
+
     p_status = evidence.get("payment_status")
     b_status = evidence.get("bank_status")
     l_status = evidence.get("ledger_status")
-    
+
     legs_present = evidence.get("legs_present", [])
     missing_legs = evidence.get("missing_legs", [])
-    
+
+    precedents_block = ""
+    if precedents:
+        lines = []
+        for idx, p in enumerate(precedents, 1):
+            lines.append(
+                f"- Precedent {idx}: Decision={p.get('decision', 'REVIEW')} by {p.get('reviewer', 'Auditor')} "
+                f"(Variance: {p.get('variance', 'N/A')}) - Comment: '{p.get('comment', '')}'"
+            )
+        precedents_block = (
+            "\n### HISTORICAL RESOLUTION PRECEDENTS (PAST HUMAN AUDITOR DECISIONS):\n"
+            + "\n".join(lines)
+            + "\nNote: Incorporate these precedents to understand recurring operational patterns and standard actions, "
+            "while remaining strictly truthful to the current observed transaction evidence.\n"
+        )
+
     prompt = f"""You are an expert AI Finance Controller conducting a rigorous, evidence-based audit investigation on a financial discrepancy.
 Analyze ONLY the observed transaction facts below. Do NOT assume, fabricate, or hallucinate details beyond these facts.
 
@@ -432,7 +499,7 @@ Analyze ONLY the observed transaction facts below. Do NOT assume, fabricate, or 
 - Reporting Streams Present: {legs_present}
 - Explicitly Missing Streams: {missing_legs}
 - References: customer_id={evidence.get('customer_id')}, order_id={evidence.get('order_id')}, ref_id={evidence.get('reference_id')}
-
+{precedents_block}
 ### REQUIRED OUTPUT:
 Respond with a single valid JSON object containing exactly these fields:
 {{
@@ -526,14 +593,19 @@ class GeminiProvider(AIProvider):
         self.api_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
-    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    def investigate(
+        self,
+        exception: Dict[str, Any],
+        evidence: Dict[str, Any],
+        precedents: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         if not self.api_key:
             raise AIConfigurationError(
                 "Gemini API key is missing. Set the GEMINI_API_KEY environment variable. "
                 "Canned or rule-based fallback responses are disabled."
             )
 
-        prompt = _build_llm_prompt(exception, evidence)
+        prompt = _build_llm_prompt(exception, evidence, precedents=precedents)
         candidate_models = [self.model]
         if self.model != "gemini-3.5-flash-lite":
             candidate_models.append("gemini-3.5-flash-lite")
@@ -638,14 +710,19 @@ class OpenAIProvider(AIProvider):
         self.api_key = (api_key or os.getenv("OPENAI_API_KEY") or "").strip()
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    def investigate(
+        self,
+        exception: Dict[str, Any],
+        evidence: Dict[str, Any],
+        precedents: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         if not self.api_key:
             raise AIConfigurationError(
                 "OpenAI API key is missing. Set the OPENAI_API_KEY environment variable. "
                 "Canned or rule-based fallback responses are disabled."
             )
 
-        prompt = _build_llm_prompt(exception, evidence)
+        prompt = _build_llm_prompt(exception, evidence, precedents=precedents)
         url = "https://api.openai.com/v1/chat/completions"
         body = {
             "model": self.model,
@@ -790,7 +867,12 @@ class RealLLMProvider(AIProvider):
             self._active_provider = None
             self.provider_name = "UNCONFIGURED"
 
-    def investigate(self, exception: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    def investigate(
+        self,
+        exception: Dict[str, Any],
+        evidence: Dict[str, Any],
+        precedents: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         if self._active_provider is None and self.provider_name != "EXPLICITLY_UNCONFIGURED":
             self.reload()
         if self._active_provider is None:
@@ -799,7 +881,7 @@ class RealLLMProvider(AIProvider):
                 "in the environment. Production requires a live LLM API key. Rule-based or canned "
                 "mock fallbacks are strictly disabled."
             )
-        return self._active_provider.investigate(exception, evidence)
+        return self._active_provider.investigate(exception, evidence, precedents=precedents)
 
     def query(self, system_instruction: str, user_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> str:
         if self._active_provider is None and self.provider_name != "EXPLICITLY_UNCONFIGURED":
@@ -1053,9 +1135,16 @@ class InvestigationStore:
 
 
 class InvestigationAgent:
-    def __init__(self, store: Optional[InvestigationStore] = None, provider: Optional[AIProvider] = None):
+    def __init__(
+        self,
+        store: Optional[InvestigationStore] = None,
+        provider: Optional[AIProvider] = None,
+        db: Optional[Session] = None,
+    ):
         self.store = store or InvestigationStore()
         self.provider = provider or RealLLMProvider()
+        self.db = db
+        self._cache: Dict[str, Dict[str, Any]] = {}
 
     def get_transaction(self, transaction_id: str, records: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if records is None:
@@ -1074,7 +1163,13 @@ class InvestigationAgent:
     def get_reconciliation_history(self, transaction_id: str, history: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         return history or []
 
-    def investigate_exception(self, exception: Dict[str, Any], evidence: Dict[str, Any], source: Optional[str] = None) -> Dict[str, Any]:
+    def investigate_exception(
+        self,
+        exception: Dict[str, Any],
+        evidence: Dict[str, Any],
+        source: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> Dict[str, Any]:
         tools_used = [
             "get_transaction",
             "get_related_records",
@@ -1083,8 +1178,11 @@ class InvestigationAgent:
             "get_reconciliation_history",
         ]
         provider_label = source or getattr(self.provider, "provider_name", "real_llm")
+        exc_id = str(exception.get("exception_id") or exception.get("audit_id") or "EX-UNKNOWN")
+        tx_id = str(exception.get("transaction_id") or evidence.get("transaction_id") or "TXN-UNKNOWN")
+
         investigation = self.store.create_investigation(
-            exception_id=str(exception.get("exception_id") or exception.get("audit_id") or "EX-UNKNOWN"),
+            exception_id=exc_id,
             provider=provider_label,
             tools_used=tools_used,
             evidence=evidence,
@@ -1093,7 +1191,35 @@ class InvestigationAgent:
         investigation["agent_status"] = InvestigationState.INVESTIGATING
         self.store.update_investigation(investigation["investigation_id"], investigation)
 
-        result = self.provider.investigate(exception, evidence)
+        # Build diagnostic cache key based on exception signature
+        exc_type = str(exception.get("exception_type") or evidence.get("exception_type") or "unresolved").lower()
+        diff_str = str(evidence.get("difference") or "")
+        legs_missing = tuple(sorted(evidence.get("missing_legs") or []))
+        legs_present = tuple(sorted(evidence.get("legs_present") or []))
+        cache_key = f"{exc_type}|{diff_str}|{legs_missing}|{legs_present}"
+
+        if cache_key in self._cache:
+            result = dict(self._cache[cache_key])
+        else:
+            # Query historical precedents from DB if available
+            target_db = db or self.db or getattr(self.store, "db", None)
+            precedents = get_historical_precedents(target_db, exc_type)
+            result = self.provider.investigate(exception, evidence, precedents=precedents)
+            # Cache diagnostic result structure
+            self._cache[cache_key] = {
+                "findings": result.get("findings", []),
+                "possible_causes": result.get("possible_causes", []),
+                "most_likely_cause": result.get("most_likely_cause", "UNKNOWN"),
+                "confidence": result.get("confidence", "LOW"),
+                "recommendation": result.get("recommendation") or result.get("recommended_action", "REVIEW"),
+                "requires_human_review": result.get("requires_human_review", True),
+                "summary": result.get("summary", "Insufficient evidence."),
+                "diagnosis": result.get("diagnosis", result.get("summary", "")),
+                "likely_cause": result.get("likely_cause", result.get("most_likely_cause", "UNKNOWN")),
+                "limitations": result.get("limitations", []),
+                "recommended_action": result.get("recommended_action", "REVIEW"),
+                "evidence": result.get("evidence", []),
+            }
 
         # Store enriched investigation contract
         investigation["findings"] = result.get("findings", [])
